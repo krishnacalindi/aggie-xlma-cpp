@@ -1,7 +1,6 @@
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
-#include <implot.h>
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
@@ -9,53 +8,40 @@
 #include <filesystem>
 #include <duckdb.hpp>
 #include <regex>
+#include <state.h>
 
-duckdb::DuckDB db(nullptr);                       // in memory databse
-duckdb::Connection con(db);                       // connection to database
-static std::string status = "Ready";              // status bar message
-std::vector<double> lma_lons, lma_lats, lma_alts; // arrays used for plotting
-size_t plot_count = 0;
-static bool reset_plot_limits = false;
-static double min_stations = 6.0;
-static double min_alt = 0.0;
-static double max_alt = 20.0;
-static double min_chi = 0.0;
-static double max_chi = 5.0;
-static double min_power = -60.0;
-static double max_power = 60.0;
+duckdb::DuckDB db(nullptr); // in memory databse
+duckdb::Connection con(db); // connection to database
+static State state;         // state of application
 
 void FilterLMA()
 {
     std::string sql =
-        "SELECT datetime, lon, lat, alt "
-        "FROM lightning "
-        "WHERE number_stations >= " +
-        std::to_string(min_stations) +
-        " AND alt >= " + std::to_string(min_alt) +
-        " AND alt <= " + std::to_string(max_alt) +
-        " AND chi >= " + std::to_string(min_chi) +
-        " AND chi <= " + std::to_string(max_chi) +
-        " AND pdb >= " + std::to_string(min_power) +
-        " AND pdb <= " + std::to_string(max_power);
+        "WITH filtered AS ("
+        "  SELECT "
+        "    CAST(EPOCH(datetime) AS FLOAT) AS time, "
+        "    CAST(lon AS FLOAT) AS lon, "
+        "    CAST(lat AS FLOAT) AS lat, "
+        "    CAST(alt AS FLOAT) AS alt "
+        "  FROM lma "
+        "  WHERE number_stations >= " +
+        std::to_string(state.min_stations) +
+        "    AND alt >= " + std::to_string(state.min_alt) +
+        "    AND alt <= " + std::to_string(state.max_alt) +
+        "    AND chi >= " + std::to_string(state.min_chi) +
+        "    AND chi <= " + std::to_string(state.max_chi) +
+        "    AND pdb >= " + std::to_string(state.min_power) +
+        "    AND pdb <= " + std::to_string(state.max_power) +
+        ") "
+        "SELECT "
+        "  time, lon, lat, alt, "
+        "  MIN(time) OVER (), MAX(time) OVER (), "
+        "  MIN(lon) OVER (), MAX(lon) OVER (), "
+        "  MIN(lat) OVER (), MAX(lat) OVER (), "
+        "  MIN(alt) OVER (), MAX(alt) OVER () "
+        "FROM filtered";
     auto result = con.Query(sql);
-    plot_count = result->RowCount();
-    status = "Plotted " + std::to_string(plot_count) + " sources";
-
-    lma_lons.clear();
-    lma_lats.clear();
-    lma_alts.clear();
-    lma_lons.reserve(plot_count);
-    lma_lats.reserve(plot_count);
-    lma_alts.reserve(plot_count);
-
-    for (size_t i = 0; i < plot_count; i++)
-    {
-        lma_lons.push_back(result->GetValue(1, i).GetValue<double>());
-        lma_lats.push_back(result->GetValue(2, i).GetValue<double>());
-        lma_alts.push_back(result->GetValue(3, i).GetValue<double>());
-    }
-
-    reset_plot_limits = true;
+    state.Plot(result);
 }
 
 void RenderUI()
@@ -75,11 +61,11 @@ void RenderUI()
                                      .result();
                 if (!selection.empty())
                 {
-                    status = "loading files";
+                    state.status = "loading files";
                     try
                     {
-                        con.Query("DROP TABLE IF EXISTS lightning");
-                        con.Query("CREATE TABLE lightning (datetime TIMESTAMP, lat DOUBLE, lon DOUBLE, alt DOUBLE, chi FLOAT, pdb FLOAT, number_stations UTINYINT)");
+                        con.Query("DROP TABLE IF EXISTS lma");
+                        con.Query("CREATE TABLE lma (datetime TIMESTAMP, lat FLOAT, lon FLOAT, alt FLOAT, chi FLOAT, pdb FLOAT, number_stations UTINYINT)");
 
                         std::regex date_pattern(R"(.*\w+_(\d+)_\d+_\d+\.dat)");
                         std::unordered_map<std::string, std::vector<std::string>> files_by_day; // grouping files per day to take advantage of DuckDB multi file reading
@@ -113,7 +99,7 @@ void RenderUI()
                             paths_sql += "]";
 
                             con.Query(
-                                "INSERT INTO lightning (datetime, lat, lon, alt, chi, pdb, number_stations) "
+                                "INSERT INTO lma (datetime, lat, lon, alt, chi, pdb, number_stations) "
                                 "SELECT TRY(MAKE_TIMESTAMP(" +
                                 date_str.substr(0, 4) + ", " + date_str.substr(5, 2) + ", " + date_str.substr(8, 2) + ", "
                                                                                                                       "CAST(FLOOR(utc_sec / 3600) AS INTEGER), "
@@ -133,13 +119,13 @@ void RenderUI()
                                             "comment='', columns={'column0':'VARCHAR'}, header=false, skip=53)"
                                             ") t;");
                         }
-                        status = "Loaded " + std::to_string(selection.size()) + " file(s)";
+                        state.status = "Loaded " + std::to_string(selection.size()) + " files";
 
                         FilterLMA();
                     }
                     catch (const std::exception &e)
                     {
-                        status = "Error occured while loading the files. Please check file format.";
+                        state.status = "Exception " + std::string(e.what()) + " happened when trying to load files.";
                     }
                 }
             }
@@ -218,9 +204,9 @@ void RenderUI()
 
             if (ImGui::MenuItem("Clear"))
             {
-                lma_lons.clear();
-                lma_lats.clear();
-                lma_alts.clear();
+                con.Query("DROP TABLE IF EXISTS lma");
+                con.Query("DROP TABLE IF EXISTS ctg");
+                state.Clear();
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Clear all current data and plots.");
@@ -286,7 +272,7 @@ void RenderUI()
     {
         if (ImGui::BeginMenuBar())
         {
-            ImGui::Text("%s", status.c_str());
+            ImGui::Text("%s", state.status.c_str());
             ImGui::EndMenuBar();
         }
         ImGui::End();
@@ -302,152 +288,153 @@ void RenderUI()
                                     ImGuiWindowFlags_NoResize |
                                     ImGuiWindowFlags_NoMove |
                                     ImGuiWindowFlags_NoBringToFrontOnFocus;
-
     ImGui::Begin("Aggie XLMA", nullptr, window_flags);
 
     float left_width = ImGui::GetContentRegionAvail().x * 0.3f;
-    ImPlot::GetStyle().MarkerSize = 1.0f;
-    ImGui::BeginChild("Tools", ImVec2(left_width, 0), true);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
+    ImGui::BeginChild("##Tools", ImVec2(left_width, 0), ImGuiChildFlags_Borders);
     ImGui::Text("Filters");
-    if (ImGui::InputDouble("Min. Stations", &min_stations))
+    if (ImGui::InputFloat("Min. Stations", &state.min_stations))
     {
         FilterLMA();
     }
-    if (ImGui::InputDouble("Min. Altitude", &min_alt))
-    {
-        FilterLMA();
-    }
-
-    if (ImGui::InputDouble("Max. Altitude", &max_alt))
+    if (ImGui::InputFloat("Min. Altitude", &state.min_alt))
     {
         FilterLMA();
     }
 
-    if (ImGui::InputDouble("Min. Chi", &min_chi))
+    if (ImGui::InputFloat("Max. Altitude", &state.max_alt))
     {
         FilterLMA();
     }
 
-    if (ImGui::InputDouble("Max. Chi", &max_chi))
+    if (ImGui::InputFloat("Min. Chi", &state.min_chi))
     {
         FilterLMA();
     }
 
-    if (ImGui::InputDouble("Min. Power", &min_power))
+    if (ImGui::InputFloat("Max. Chi", &state.max_chi))
     {
         FilterLMA();
     }
 
-    if (ImGui::InputDouble("Max. Power", &max_power))
+    if (ImGui::InputFloat("Min. Power", &state.min_power))
+    {
+        FilterLMA();
+    }
+
+    if (ImGui::InputFloat("Max. Power", &state.max_power))
     {
         FilterLMA();
     }
     ImGui::Text("Maps");
     ImGui::Text("Colors");
+    
+    ImGui::Combo("Colormaps", &state.view.colormap_idx, state.view.colormap_options.data(), state.view.colormap_options.size()); // not dynamic yet
     ImGui::Text("Animation");
     ImGui::EndChild();
 
     ImGui::SameLine();
 
-    ImGui::BeginChild("Plots", ImVec2(0, 0), true);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::BeginChild("##Plots", ImVec2(0, 0), ImGuiChildFlags_Borders);
     float fixed_plot_height = ImGui::GetContentRegionAvail().y * 0.15f;
     float fixed_plot_width = ImGui::GetContentRegionAvail().x * 0.8f;
-    ImPlotFlags plot_flags = ImPlotFlags_NoTitle |
-                             ImPlotFlags_NoLegend |
-                             ImPlotFlags_NoMouseText |
-                             ImPlotFlags_NoMenus;
-    ImPlotAxisFlags axis_flags = ImPlotAxisFlags_NoGridLines;
-    if (ImPlot::BeginPlot("##TimeAltitude", ImVec2(-1, fixed_plot_height), plot_flags))
+    float axis_height = ImGui::GetFontSize() * 1.2f;
+    ImGui::BeginChild("##TimeAltitude", ImVec2(-1, fixed_plot_height), ImGuiChildFlags_Borders);
     {
-        ImPlot::SetupAxis(ImAxis_X1, nullptr, axis_flags);
-        ImPlot::SetupAxis(ImAxis_Y1, nullptr, axis_flags);
-        ImPlot::EndPlot();
-    }
-    if (ImPlot::BeginPlot("##LongitudeAltitude", ImVec2(fixed_plot_width, fixed_plot_height), plot_flags))
-    {
-        ImPlot::SetupAxis(ImAxis_X1, nullptr, axis_flags);
-        ImPlot::SetupAxis(ImAxis_Y1, nullptr, axis_flags);
-        if (reset_plot_limits)
-        {
-            double x_min = 0.0, x_max = 0.0, y_min = 0.0, y_max = 0.0;
-            if (!lma_lons.empty() && !lma_alts.empty())
-            {
-                x_min = *std::min_element(lma_lons.begin(), lma_lons.end());
-                x_max = *std::max_element(lma_lons.begin(), lma_lons.end());
-                y_min = *std::min_element(lma_alts.begin(), lma_alts.end());
-                y_max = *std::max_element(lma_alts.begin(), lma_alts.end());
-                ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max, ImPlotCond_Always);
-                ImPlot::SetupAxisLimits(ImAxis_Y1, y_min, y_max, ImPlotCond_Always);
-            }
-        }
-        if (!lma_lons.empty() && !lma_alts.empty())
-        {
-            ImPlot::PlotScatter("Lightning", lma_lons.data(), lma_alts.data(), plot_count);
-        }
-        ImPlot::EndPlot();
-    }
-    ImGui::SameLine();
-    if (ImPlot::BeginPlot("##AltitudeHistogram", ImVec2(-1, fixed_plot_height), plot_flags))
-    {
-        ImPlot::SetupAxis(ImAxis_X1, nullptr, axis_flags);
-        ImPlot::SetupAxis(ImAxis_Y1, nullptr, axis_flags);
-        ImPlot::EndPlot();
-    }
-    if (ImPlot::BeginPlot("##LongitudeLatitude", ImVec2(fixed_plot_width, -1), plot_flags))
-    {
-        if (ImGui::IsMouseClicked(0))
-        {
-            ImPlotPoint pt = ImPlot::GetPlotMousePos();
-            status = "Point clicked- x: " + std::to_string(pt.x) + " y: " + std::to_string(pt.y);
-            // data.push_back(pt);
-        }
-        ImPlot::SetupAxis(ImAxis_X1, nullptr, axis_flags);
-        ImPlot::SetupAxis(ImAxis_Y1, nullptr, axis_flags);
-        if (reset_plot_limits)
-        {
-            double x_min = 0.0, x_max = 0.0, y_min = 0.0, y_max = 0.0;
-            if (!lma_lats.empty() && !lma_lons.empty())
-            {
-                x_min = *std::min_element(lma_lons.begin(), lma_lons.end());
-                x_max = *std::max_element(lma_lons.begin(), lma_lons.end());
-                y_min = *std::min_element(lma_lats.begin(), lma_lats.end());
-                y_max = *std::max_element(lma_lats.begin(), lma_lats.end());
-                ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max, ImPlotCond_Always);
-                ImPlot::SetupAxisLimits(ImAxis_Y1, y_min, y_max, ImPlotCond_Always);
-            }
-        }
-        if (!lma_lats.empty() && !lma_lons.empty())
-        {
-            ImPlot::PlotScatter("Lightning", lma_lons.data(), lma_lats.data(), plot_count);
-        }
-        ImPlot::EndPlot();
-    }
-    ImGui::SameLine();
-    if (ImPlot::BeginPlot("##AltitudeLatitude", ImVec2(-1, -1), plot_flags))
-    {
-        ImPlot::SetupAxis(ImAxis_X1, nullptr, axis_flags);
-        ImPlot::SetupAxis(ImAxis_Y1, nullptr, axis_flags);
-        if (reset_plot_limits)
-        {
-            double x_min = 0.0, x_max = 0.0, y_min = 0.0, y_max = 0.0;
-            if (!lma_lats.empty() && !lma_lons.empty())
-            {
-                x_min = *std::min_element(lma_alts.begin(), lma_alts.end());
-                x_max = *std::max_element(lma_alts.begin(), lma_alts.end());
-                y_min = *std::min_element(lma_lats.begin(), lma_lats.end());
-                y_max = *std::max_element(lma_lats.begin(), lma_lats.end());
-                ImPlot::SetupAxisLimits(ImAxis_X1, x_min, x_max, ImPlotCond_Always);
-                ImPlot::SetupAxisLimits(ImAxis_Y1, y_min, y_max, ImPlotCond_Always);
-            }
-            reset_plot_limits = false;
-        }
-        if (!lma_alts.empty() && !lma_lats.empty())
-        {
-            ImPlot::PlotScatter("Lightning", lma_alts.data(), lma_lats.data(), plot_count);
-        }
-        ImPlot::EndPlot();
+        ImVec2 window_size = ImGui::GetWindowSize();
+        float width = window_size.x;
+        float height = window_size.y;
+        state.view.time_alt_width = width - axis_height;
+        state.view.time_alt_height = height - axis_height;
+        ImGui::BeginChild("##AltAxis1", ImVec2(axis_height, height - axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::Image((ImTextureID)state.view.time_alt_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node1", ImVec2(axis_height, axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("##TimeAxis1", ImVec2(width - axis_height, axis_height), false);
+        ImGui::EndChild();
     }
     ImGui::EndChild();
+    ImGui::BeginChild("##LongitudeAltitude", ImVec2(fixed_plot_width, fixed_plot_height), ImGuiChildFlags_Borders);
+    {
+        ImVec2 window_size = ImGui::GetWindowSize();
+        float width = window_size.x;
+        float height = window_size.y;
+        state.view.lon_alt_width = width - axis_height;
+        state.view.lon_alt_height = height - axis_height;
+        ImGui::BeginChild("##AltAxis2", ImVec2(axis_height, height - axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::Image((ImTextureID)state.view.lon_alt_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node2", ImVec2(axis_height, axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("##LonAxis2", ImVec2(width - axis_height, axis_height), false);
+        ImGui::EndChild();
+    }
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("##AltitudeHistogram", ImVec2(-1, fixed_plot_height), ImGuiChildFlags_Borders);
+    {
+        ImVec2 window_size = ImGui::GetWindowSize();
+        float width = window_size.x;
+        float height = window_size.y;
+        state.view.alt_hist_width = width - axis_height;
+        state.view.alt_hist_height = height - axis_height;
+        ImGui::BeginChild("##AltAxis3", ImVec2(axis_height, height - axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::Image((ImTextureID)state.view.alt_hist_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node3", ImVec2(axis_height, axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("##CountAxis3", ImVec2(width - axis_height, axis_height), false);
+        ImGui::EndChild();
+    }
+    ImGui::EndChild();
+    ImGui::BeginChild("##LongitudeLatitude", ImVec2(fixed_plot_width, -1), ImGuiChildFlags_Borders);
+    {
+        ImVec2 window_size = ImGui::GetWindowSize();
+        float width = window_size.x;
+        float height = window_size.y;
+        state.view.lon_lat_width = width - axis_height;
+        state.view.lon_lat_height = height - axis_height;
+        ImGui::BeginChild("##LatAxis4", ImVec2(axis_height, height - axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::Image((ImTextureID)state.view.lon_lat_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node4", ImVec2(axis_height, axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("##LonAxis4", ImVec2(width - axis_height, axis_height), false);
+        ImGui::EndChild();
+    }
+    ImGui::EndChild();
+    ImGui::SameLine();
+    ImGui::BeginChild("##AltitudeLatitude", ImVec2(-1, -1), ImGuiChildFlags_Borders);
+    {
+        ImVec2 window_size = ImGui::GetWindowSize();
+        float width = window_size.x;
+        float height = window_size.y;
+        state.view.alt_lat_width = width - axis_height;
+        state.view.alt_lat_height = height - axis_height;
+        ImGui::BeginChild("##LatAxis5", ImVec2(axis_height, height - axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::Image((ImTextureID)state.view.alt_lat_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node5", ImVec2(axis_height, axis_height), false);
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("##AltAxis5", ImVec2(width - axis_height, axis_height), false);
+        ImGui::EndChild();
+    }
+    ImGui::EndChild();
+    ImGui::EndChild();
+    ImGui::PopStyleVar(2);
     ImGui::End();
 }
 
@@ -494,11 +481,10 @@ int main()
 
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImPlot::CreateContext();
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.FontGlobalScale = 1.8f;
-    ImGui::StyleColorsLight();
+    ImGui::StyleColorsDark();
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
@@ -526,7 +512,6 @@ int main()
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
-    ImPlot::DestroyContext();
     ImGui::DestroyContext();
 
     glfwDestroyWindow(window);

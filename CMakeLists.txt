@@ -1,17 +1,20 @@
 cmake_minimum_required(VERSION 3.20)
 project(AggieXLMA)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(glfw3 CONFIG REQUIRED)
 find_package(GLEW CONFIG REQUIRED)
+find_package(glm CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
-find_package(implot CONFIG REQUIRED)
 find_package(DuckDB CONFIG REQUIRED)
 find_path(PORTABLE_FILE_DIALOGS_INCLUDE_DIRS "portable-file-dialogs.h")
 
+include_directories(${CMAKE_SOURCE_DIR}/src)
+
 set(SOURCES
+    src/state.cpp
     src/main.cpp
 )
 
@@ -28,8 +31,8 @@ target_include_directories(AggieXLMA PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE
     glfw
     GLEW::GLEW
+    glm::glm
     imgui::imgui
-    implot::implot
     $<IF:$<TARGET_EXISTS:duckdb>,duckdb,duckdb_static>
 )
 
