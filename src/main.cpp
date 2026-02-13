@@ -16,13 +16,13 @@ static State state;         // state of application
 
 void FilterLMA()
 {
-    std::string sql =
+    std::string filter_query =
         "WITH filtered AS ("
         "  SELECT "
-        "    CAST(EPOCH(datetime) AS FLOAT) AS time, "
-        "    CAST(lon AS FLOAT) AS lon, "
-        "    CAST(lat AS FLOAT) AS lat, "
-        "    CAST(alt AS FLOAT) AS alt "
+        "    CAST(EPOCH_NS(datetime) AS DOUBLE) AS time, "
+        "    lon, "
+        "    lat, "
+        "    alt "
         "  FROM lma "
         "  WHERE number_stations >= " +
         std::to_string(state.min_stations) +
@@ -34,13 +34,14 @@ void FilterLMA()
         "    AND pdb <= " + std::to_string(state.max_power) +
         ") "
         "SELECT "
-        "  time, lon, lat, alt, "
+        "  CAST(time - MIN(time) OVER () AS FLOAT) AS time, "
+        "  lon, lat, alt, "
         "  MIN(time) OVER (), MAX(time) OVER (), "
         "  MIN(lon) OVER (), MAX(lon) OVER (), "
         "  MIN(lat) OVER (), MAX(lat) OVER (), "
         "  MIN(alt) OVER (), MAX(alt) OVER () "
         "FROM filtered";
-    auto result = con.Query(sql);
+    auto result = con.Query(filter_query);
     state.Plot(result);
 }
 
@@ -65,10 +66,10 @@ void RenderUI()
                     try
                     {
                         con.Query("DROP TABLE IF EXISTS lma");
-                        con.Query("CREATE TABLE lma (datetime TIMESTAMP, lat FLOAT, lon FLOAT, alt FLOAT, chi FLOAT, pdb FLOAT, number_stations UTINYINT)");
+                        con.Query("CREATE TABLE lma (datetime TIMESTAMP_NS, lat FLOAT, lon FLOAT, alt FLOAT, chi FLOAT, pdb FLOAT, number_stations UTINYINT)");
 
                         std::regex date_pattern(R"(.*\w+_(\d+)_\d+_\d+\.dat)");
-                        std::unordered_map<std::string, std::vector<std::string>> files_by_day; // grouping files per day to take advantage of DuckDB multi file reading
+                        std::unordered_map<int64_t, std::vector<std::string>> files_by_day; // grouping files per day to take advantage of DuckDB multi file reading
                         for (const auto &filepath : selection)
                         {
                             std::smatch match;
@@ -80,12 +81,20 @@ void RenderUI()
                                 int year = 2000 + std::stoi(yymmdd.substr(0, 2));
                                 int month = std::stoi(yymmdd.substr(2, 2));
                                 int day = std::stoi(yymmdd.substr(4, 2));
-                                std::string key = std::to_string(year) + "-" + (month < 10 ? "0" : "") + std::to_string(month) + "-" + (day < 10 ? "0" : "") + std::to_string(day);
-                                files_by_day[key].push_back(filepath);
+                                std::tm tm = {};
+                                tm.tm_year = year - 1900;
+                                tm.tm_mon = month - 1;
+                                tm.tm_mday = day;
+                                tm.tm_hour = 0;
+                                tm.tm_min = 0;
+                                tm.tm_sec = 0;
+                                std::time_t time_t_value = std::mktime(&tm);
+                                int64_t ns_since_epoch = static_cast<int64_t>(time_t_value);
+                                files_by_day[ns_since_epoch].push_back(filepath);
                             }
                         }
 
-                        for (const auto &[date_str, paths] : files_by_day)
+                        for (const auto &[day_epoch, paths] : files_by_day)
                         {
                             std::string paths_sql = "[";
 
@@ -100,27 +109,23 @@ void RenderUI()
 
                             con.Query(
                                 "INSERT INTO lma (datetime, lat, lon, alt, chi, pdb, number_stations) "
-                                "SELECT TRY(MAKE_TIMESTAMP(" +
-                                date_str.substr(0, 4) + ", " + date_str.substr(5, 2) + ", " + date_str.substr(8, 2) + ", "
-                                                                                                                      "CAST(FLOOR(utc_sec / 3600) AS INTEGER), "
-                                                                                                                      "CAST(FLOOR(utc_sec / 60 % 60) AS INTEGER), "
-                                                                                                                      "CAST(utc_sec % 60 AS INTEGER))), "
-                                                                                                                      "TRY_CAST(arr[2] AS DOUBLE), "
-                                                                                                                      "TRY_CAST(arr[3] AS DOUBLE), "
-                                                                                                                      "TRY(CAST(arr[4] AS DOUBLE) / 1000), "
-                                                                                                                      "TRY_CAST(arr[5] AS FLOAT), "
-                                                                                                                      "TRY_CAST(arr[6] AS FLOAT), "
-                                                                                                                      "CAST(bit_count(TRY_CAST(arr[7] AS INTEGER)) AS UTINYINT) "
-                                                                                                                      "FROM ("
-                                                                                                                      "SELECT REGEXP_SPLIT_TO_ARRAY(TRIM(column0), ' +') AS arr, "
-                                                                                                                      "CAST((REGEXP_SPLIT_TO_ARRAY(TRIM(column0), ' +'))[1] AS DOUBLE) AS utc_sec "
-                                                                                                                      "FROM read_csv(" +
-                                paths_sql + ", auto_detect=false, delim='|', quote='\"', escape='\"', new_line='\\n', "
-                                            "comment='', columns={'column0':'VARCHAR'}, header=false, skip=53)"
+                                "SELECT "
+                                "TRY(MAKE_TIMESTAMP_NS(CAST((CAST(arr[1] AS DOUBLE) + " +
+                                std::to_string(day_epoch) + ") * 1E9 AS BIGINT))), "
+                                                            "TRY_CAST(arr[2] AS DOUBLE), "
+                                                            "TRY_CAST(arr[3] AS DOUBLE), "
+                                                            "TRY(CAST(arr[4] AS DOUBLE) / 1000), "
+                                                            "TRY_CAST(arr[5] AS FLOAT), "
+                                                            "TRY_CAST(arr[6] AS FLOAT), "
+                                                            "CAST(bit_count(TRY_CAST(arr[7] AS INTEGER)) AS UTINYINT) "
+                                                            "FROM ("
+                                                            "SELECT REGEXP_SPLIT_TO_ARRAY(TRIM(column0), ' +') AS arr "
+                                                            "FROM read_csv(" +
+                                paths_sql + ", auto_detect=false, delim='|', quote='\"', escape='\"', "
+                                            "new_line='\\n', comment='', columns={'column0':'VARCHAR'}, header=false, skip=53)"
                                             ") t;");
                         }
                         state.status = "Loaded " + std::to_string(selection.size()) + " files";
-
                         FilterLMA();
                     }
                     catch (const std::exception &e)
@@ -329,7 +334,7 @@ void RenderUI()
     }
     ImGui::Text("Maps");
     ImGui::Text("Colors");
-    
+
     ImGui::Combo("Colormaps", &state.view.colormap_idx, state.view.colormap_options.data(), state.view.colormap_options.size()); // not dynamic yet
     ImGui::Text("Animation");
     ImGui::EndChild();

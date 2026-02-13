@@ -107,8 +107,8 @@ void State::Plot(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
     lon_alts.reserve(view.num_sources * 3);
     lon_lats.reserve(view.num_sources * 3);
     alt_lats.reserve(view.num_sources * 3);
-    view.time_min = res->GetValue<float>(4, 0);
-    view.time_max = res->GetValue<float>(5, 0);
+    view.time_min = 0.0f;
+    view.time_max = res->GetValue<float>(5, 0) - res->GetValue<float>(4, 0);
     view.lon_min = res->GetValue<float>(6, 0);
     view.lon_max = res->GetValue<float>(7, 0);
     view.lat_min = res->GetValue<float>(8, 0);
@@ -134,8 +134,8 @@ void State::Plot(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
                 const float lat = lat_data[i];
                 const float alt = alt_data[i];
                 const float time = time_data[i];
-                const float color = (time - view.time_min) / (view.time_max - view.time_min);
-                time_alts.push_back(time - view.time_min);
+                const float color = time / view.time_max;
+                time_alts.push_back(time);
                 time_alts.push_back(alt);
                 time_alts.push_back(color);
                 lon_alts.push_back(lon);
@@ -161,7 +161,7 @@ void State::Plot(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
             glClear(GL_COLOR_BUFFER_BIT);
             glUseProgram(view.shader_program);
             glEnable(GL_PROGRAM_POINT_SIZE);
-            glm::mat4 proj = glm::ortho(x_min, x_max, y_min, y_max, -1.0f, 1.0f);
+            glm::mat4 proj = glm::ortho(x_min, x_max, y_max, y_min, -1.0f, 1.0f);
             glUniformMatrix4fv(glGetUniformLocation(view.shader_program, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, view.colormaps);
