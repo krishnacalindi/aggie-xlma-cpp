@@ -25,13 +25,13 @@ void FilterLMA()
         "    alt "
         "  FROM lma "
         "  WHERE number_stations >= " +
-        std::to_string(state.min_stations) +
-        "    AND alt >= " + std::to_string(state.min_alt) +
-        "    AND alt <= " + std::to_string(state.max_alt) +
-        "    AND chi >= " + std::to_string(state.min_chi) +
-        "    AND chi <= " + std::to_string(state.max_chi) +
-        "    AND pdb >= " + std::to_string(state.min_power) +
-        "    AND pdb <= " + std::to_string(state.max_power) +
+        std::to_string(state.filter.min_stations) +
+        "    AND alt >= " + std::to_string(state.filter.min_alt) +
+        "    AND alt <= " + std::to_string(state.filter.max_alt) +
+        "    AND chi >= " + std::to_string(state.filter.min_chi) +
+        "    AND chi <= " + std::to_string(state.filter.max_chi) +
+        "    AND pdb >= " + std::to_string(state.filter.min_power) +
+        "    AND pdb <= " + std::to_string(state.filter.max_power) +
         ") "
         "SELECT "
         "  CAST(time - MIN(time) OVER () AS FLOAT) AS time, "
@@ -42,7 +42,7 @@ void FilterLMA()
         "  MIN(alt) OVER (), MAX(alt) OVER () "
         "FROM filtered";
     auto result = con.Query(filter_query);
-    state.Plot(result);
+    state.Draw(result);
 }
 
 void RenderUI()
@@ -299,43 +299,43 @@ void RenderUI()
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
     ImGui::BeginChild("##Tools", ImVec2(left_width, 0), ImGuiChildFlags_Borders);
     ImGui::Text("Filters");
-    if (ImGui::InputFloat("Min. Stations", &state.min_stations))
+    if (ImGui::InputFloat("Min. Stations", &state.filter.min_stations))
     {
         FilterLMA();
     }
-    if (ImGui::InputFloat("Min. Altitude", &state.min_alt))
-    {
-        FilterLMA();
-    }
-
-    if (ImGui::InputFloat("Max. Altitude", &state.max_alt))
+    if (ImGui::InputFloat("Min. Altitude", &state.filter.min_alt))
     {
         FilterLMA();
     }
 
-    if (ImGui::InputFloat("Min. Chi", &state.min_chi))
+    if (ImGui::InputFloat("Max. Altitude", &state.filter.max_alt))
     {
         FilterLMA();
     }
 
-    if (ImGui::InputFloat("Max. Chi", &state.max_chi))
+    if (ImGui::InputFloat("Min. Chi", &state.filter.min_chi))
     {
         FilterLMA();
     }
 
-    if (ImGui::InputFloat("Min. Power", &state.min_power))
+    if (ImGui::InputFloat("Max. Chi", &state.filter.max_chi))
     {
         FilterLMA();
     }
 
-    if (ImGui::InputFloat("Max. Power", &state.max_power))
+    if (ImGui::InputFloat("Min. Power", &state.filter.min_power))
+    {
+        FilterLMA();
+    }
+
+    if (ImGui::InputFloat("Max. Power", &state.filter.max_power))
     {
         FilterLMA();
     }
     ImGui::Text("Maps");
     ImGui::Text("Colors");
 
-    ImGui::Combo("Colormaps", &state.view.colormap_idx, state.view.colormap_options.data(), state.view.colormap_options.size()); // not dynamic yet
+    ImGui::Combo("Colormaps", &state.graphics.colormap.index, state.graphics.colormap.options.data(), state.graphics.colormap.options.size()); // not dynamic yet
     ImGui::Text("Animation");
     ImGui::EndChild();
 
@@ -345,22 +345,57 @@ void RenderUI()
     ImGui::BeginChild("##Plots", ImVec2(0, 0), ImGuiChildFlags_Borders);
     float fixed_plot_height = ImGui::GetContentRegionAvail().y * 0.15f;
     float fixed_plot_width = ImGui::GetContentRegionAvail().x * 0.8f;
-    float axis_height = ImGui::GetFontSize() * 1.2f;
+    float axis_size = ImGui::GetFontSize() * 1.8f;
+    float tick_height = ImGui::GetFontSize() * 0.4f;
     ImGui::BeginChild("##TimeAltitude", ImVec2(-1, fixed_plot_height), ImGuiChildFlags_Borders);
     {
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
-        state.view.time_alt_width = width - axis_height;
-        state.view.time_alt_height = height - axis_height;
-        ImGui::BeginChild("##AltAxis1", ImVec2(axis_height, height - axis_height), false);
+        state.time_alt.width = width - axis_size;
+        state.time_alt.height = height - axis_size;
+        ImGui::BeginChild("##AltAxis1", ImVec2(axis_size, height - axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.5f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float y = p.y + tick_positions[i] * state.time_alt.height;
+                float x = p.x + axis_size;
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.time_alt.y_major_ticks[i].c_str();
+                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
+                float char_x = x - tick_height - ImGui::GetFontSize();
+                for (const char *c = label; *c != '\0'; c++)
+                {
+                    char temp[2] = {*c, '\0'};
+                    ImVec2 char_size = ImGui::CalcTextSize(temp);
+                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
+                    char_y += char_size.x;
+                }
+            }
+        }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.view.time_alt_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
-        ImGui::BeginChild("##Node1", ImVec2(axis_height, axis_height), false);
+        ImGui::Image((ImTextureID)state.time_alt.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node1", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("##TimeAxis1", ImVec2(width - axis_height, axis_height), false);
+        ImGui::BeginChild("##TimeAxis1", ImVec2(width - axis_size, axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float x = p.x + tick_positions[i] * state.time_alt.width;
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.time_alt.x_major_ticks[i].c_str();
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+            }
+        }
         ImGui::EndChild();
     }
     ImGui::EndChild();
@@ -369,16 +404,50 @@ void RenderUI()
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
-        state.view.lon_alt_width = width - axis_height;
-        state.view.lon_alt_height = height - axis_height;
-        ImGui::BeginChild("##AltAxis2", ImVec2(axis_height, height - axis_height), false);
+        state.lon_alt.width = width - axis_size;
+        state.lon_alt.height = height - axis_size;
+        ImGui::BeginChild("##AltAxis2", ImVec2(axis_size, height - axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.5f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float y = p.y + tick_positions[i] * state.lon_alt.height;
+                float x = p.x + axis_size;
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.lon_alt.y_major_ticks[i].c_str();
+                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
+                float char_x = x - tick_height - ImGui::GetFontSize();
+                for (const char *c = label; *c != '\0'; c++)
+                {
+                    char temp[2] = {*c, '\0'};
+                    ImVec2 char_size = ImGui::CalcTextSize(temp);
+                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
+                    char_y += char_size.x;
+                }
+            }
+        }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.view.lon_alt_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
-        ImGui::BeginChild("##Node2", ImVec2(axis_height, axis_height), false);
+        ImGui::Image((ImTextureID)state.lon_alt.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node2", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("##LonAxis2", ImVec2(width - axis_height, axis_height), false);
+        ImGui::BeginChild("##LonAxis2", ImVec2(width - axis_size, axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float x = p.x + tick_positions[i] * state.lon_alt.width;
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.lon_alt.x_major_ticks[i].c_str();
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+            }
+        }
         ImGui::EndChild();
     }
     ImGui::EndChild();
@@ -388,16 +457,50 @@ void RenderUI()
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
-        state.view.alt_hist_width = width - axis_height;
-        state.view.alt_hist_height = height - axis_height;
-        ImGui::BeginChild("##AltAxis3", ImVec2(axis_height, height - axis_height), false);
+        state.alt_hist.width = width - axis_size;
+        state.alt_hist.height = height - axis_size;
+        ImGui::BeginChild("##AltAxis3", ImVec2(axis_size, height - axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.5f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float y = p.y + tick_positions[i] * state.alt_hist.height;
+                float x = p.x + axis_size;
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.alt_hist.y_major_ticks[i].c_str();
+                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
+                float char_x = x - tick_height - ImGui::GetFontSize();
+                for (const char *c = label; *c != '\0'; c++)
+                {
+                    char temp[2] = {*c, '\0'};
+                    ImVec2 char_size = ImGui::CalcTextSize(temp);
+                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
+                    char_y += char_size.x;
+                }
+            }
+        }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.view.alt_hist_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
-        ImGui::BeginChild("##Node3", ImVec2(axis_height, axis_height), false);
+        ImGui::Image((ImTextureID)state.alt_hist.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node3", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("##CountAxis3", ImVec2(width - axis_height, axis_height), false);
+        ImGui::BeginChild("##CountAxis3", ImVec2(width - axis_size, axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.5f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float x = p.x + tick_positions[i] * state.alt_hist.width;
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.alt_hist.x_major_ticks[i].c_str();
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+            }
+        }
         ImGui::EndChild();
     }
     ImGui::EndChild();
@@ -406,16 +509,50 @@ void RenderUI()
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
-        state.view.lon_lat_width = width - axis_height;
-        state.view.lon_lat_height = height - axis_height;
-        ImGui::BeginChild("##LatAxis4", ImVec2(axis_height, height - axis_height), false);
+        state.lon_lat.width = width - axis_size;
+        state.lon_lat.height = height - axis_size;
+        ImGui::BeginChild("##LatAxis4", ImVec2(axis_size, height - axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float y = p.y + tick_positions[i] * state.lon_lat.height;
+                float x = p.x + axis_size;
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.lon_lat.y_major_ticks[i].c_str();
+                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
+                float char_x = x - tick_height - ImGui::GetFontSize();
+                for (const char *c = label; *c != '\0'; c++)
+                {
+                    char temp[2] = {*c, '\0'};
+                    ImVec2 char_size = ImGui::CalcTextSize(temp);
+                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
+                    char_y += char_size.x;
+                }
+            }
+        }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.view.lon_lat_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
-        ImGui::BeginChild("##Node4", ImVec2(axis_height, axis_height), false);
+        ImGui::Image((ImTextureID)state.lon_lat.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node4", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("##LonAxis4", ImVec2(width - axis_height, axis_height), false);
+        ImGui::BeginChild("##LonAxis4", ImVec2(width - axis_size, axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float x = p.x + tick_positions[i] * state.lon_lat.width;
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.lon_lat.x_major_ticks[i].c_str();
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+            }
+        }
         ImGui::EndChild();
     }
     ImGui::EndChild();
@@ -425,16 +562,50 @@ void RenderUI()
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
-        state.view.alt_lat_width = width - axis_height;
-        state.view.alt_lat_height = height - axis_height;
-        ImGui::BeginChild("##LatAxis5", ImVec2(axis_height, height - axis_height), false);
+        state.alt_lat.width = width - axis_size;
+        state.alt_lat.height = height - axis_size;
+        ImGui::BeginChild("##LatAxis5", ImVec2(axis_size, height - axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float y = p.y + tick_positions[i] * state.alt_lat.height;
+                float x = p.x + axis_size;
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.alt_lat.y_major_ticks[i].c_str();
+                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
+                float char_x = x - tick_height - ImGui::GetFontSize();
+                for (const char *c = label; *c != '\0'; c++)
+                {
+                    char temp[2] = {*c, '\0'};
+                    ImVec2 char_size = ImGui::CalcTextSize(temp);
+                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
+                    char_y += char_size.x;
+                }
+            }
+        }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.view.alt_lat_texture, ImVec2(width - axis_height, height - axis_height), ImVec2(0, 0), ImVec2(1, 1));
-        ImGui::BeginChild("##Node5", ImVec2(axis_height, axis_height), false);
+        ImGui::Image((ImTextureID)state.alt_lat.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::BeginChild("##Node5", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("##AltAxis5", ImVec2(width - axis_height, axis_height), false);
+        ImGui::BeginChild("##AltAxis5", ImVec2(width - axis_size, axis_size), false);
+        {
+            ImDrawList *draw_list = ImGui::GetWindowDrawList();
+            ImVec2 p = ImGui::GetWindowPos();
+            float tick_positions[] = {0.1f, 0.5f, 0.9f};
+            for (int i = 0; i < 5; i++)
+            {
+                float x = p.x + tick_positions[i] * state.alt_lat.width;
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                const char *label = state.alt_lat.x_major_ticks[i].c_str();
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+            }
+        }
         ImGui::EndChild();
     }
     ImGui::EndChild();
