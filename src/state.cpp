@@ -1,16 +1,17 @@
 #include "state.h"
+#include <format>
 
 void State::InitializeGraphics()
 {
     const char *vert_src = R"(
 #version 330 core
-layout(location = 0) in vec2 position;
-layout(location = 1) in float value;
+layout(location = 0) in float x_pos;
+layout(location = 1) in float y_pos;
+layout(location = 2) in float value;
 uniform mat4 projection;
 out float vValue;
-
 void main() {
-    gl_Position = projection * vec4(position, 0.0, 1.0);
+    gl_Position = projection * vec4(x_pos, y_pos, 0.0, 1.0);
     gl_PointSize = 1.0;
     vValue = value;
 }
@@ -58,6 +59,13 @@ void main() {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+    // global vbo and vao
+    glGenVertexArrays(1, &graphics.vao);
+    glGenBuffers(1, &graphics.vbo);
+    glBindVertexArray(graphics.vao);
+    glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
+    glBindVertexArray(0);
+
     auto setup = [](Plot &plot_type)
     {
         glGenTextures(1, &plot_type.texture);
@@ -69,16 +77,6 @@ void main() {
         glBindFramebuffer(GL_FRAMEBUFFER, plot_type.fbo);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, plot_type.texture, 0);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        glGenVertexArrays(1, &plot_type.vao);
-        glGenBuffers(1, &plot_type.vbo);
-        glBindVertexArray(plot_type.vao);
-        glBindBuffer(GL_ARRAY_BUFFER, plot_type.vbo);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)0);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *)(2 * sizeof(float)));
-        glEnableVertexAttribArray(1);
-        glBindVertexArray(0);
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
     };
 
     setup(time_alt);
@@ -88,6 +86,8 @@ void main() {
     setup(alt_lat);
 
     graphics.initialized = true;
+
+    // loading map data
 }
 
 void State::Draw(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
@@ -96,77 +96,85 @@ void State::Draw(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
     if (!graphics.initialized)
         InitializeGraphics();
 
-    std::vector<float> time_alt_data, lon_alt_data, lon_lat_data, alt_lat_data;
     graphics.sources = res->RowCount();
-    time_alt_data.reserve(graphics.sources * 3);
-    lon_alt_data.reserve(graphics.sources * 3);
-    lon_lat_data.reserve(graphics.sources * 3);
-    alt_lat_data.reserve(graphics.sources * 3);
-    time_alt.x_min = 0; // min hardcoded to 0 since we do relative to minimum to allow for float for epoch_ns
-    time_alt.x_max = res->GetValue<float>(5, 0) - res->GetValue<float>(4, 0);
-    time_alt.y_min = lon_alt.y_min = alt_hist.y_min = alt_lat.x_min = res->GetValue<float>(10, 0);
-    time_alt.y_max = lon_alt.y_max = alt_hist.y_max = alt_lat.x_max = res->GetValue<float>(11, 0);
-    lon_alt.x_min = lon_lat.x_min = res->GetValue<float>(6, 0);
-    lon_alt.x_max = lon_lat.x_max = res->GetValue<float>(7, 0);
-    alt_lat.y_min = lon_lat.y_min = res->GetValue<float>(8, 0);
-    alt_lat.y_max = lon_lat.y_max = res->GetValue<float>(9, 0);
-    for (int i = 0; i < 5; i++)
-    {
-        float t = 0.1f + i * 0.2f;
-        time_alt.x_major_ticks[i] = std::to_string(time_alt.x_min + t * (time_alt.x_max - time_alt.x_min));
-        lon_alt.x_major_ticks[i] = std::to_string(lon_alt.x_min + t * (lon_alt.x_max - lon_alt.x_min));
-        lon_lat.x_major_ticks[i] = std::to_string(lon_lat.x_min + t * (lon_lat.x_max - lon_lat.x_min));
-        lon_lat.y_major_ticks[i] = std::to_string(lon_lat.y_min + t * (lon_lat.y_max - lon_lat.y_min));
-        alt_lat.y_major_ticks[i] = std::to_string(alt_lat.y_min + t * (alt_lat.y_max - alt_lat.y_min));
-    }
-    for (int i = 0; i < 3; i++)
-    {
-        float t = 0.1f + i * 0.4f;
-        time_alt.y_major_ticks[i] = std::to_string(time_alt.y_min + t * (time_alt.y_max - time_alt.y_min));
-        lon_alt.y_major_ticks[i] = std::to_string(lon_alt.y_min + t * (lon_alt.y_max - lon_alt.y_min));
-        alt_hist.y_major_ticks[i] = std::to_string(alt_hist.y_min + t * (alt_hist.y_max - alt_hist.y_min));
-        alt_lat.x_major_ticks[i] = std::to_string(alt_lat.x_min + t * (alt_lat.x_max - alt_lat.x_min));
-    }
 
-    if (graphics.sources > 0)
+    if (graphics.sources > 1) // to prevent axis collapse from min and max being equal
     {
+        // stores data in opengl format
+        std::vector<float> vertex_data;
+        vertex_data.reserve(graphics.sources * 5);
+
+        // axis updates
+        time_alt.x_min = res->GetValue<float>(5, 0);
+        time_alt.x_max = res->GetValue<float>(6, 0);
+        time_alt.y_min = lon_alt.y_min = alt_hist.y_min = alt_lat.x_min = res->GetValue<float>(11, 0);
+        time_alt.y_max = lon_alt.y_max = alt_hist.y_max = alt_lat.x_max = res->GetValue<float>(12, 0);
+        lon_alt.x_min = lon_lat.x_min = res->GetValue<float>(7, 0);
+        lon_alt.x_max = lon_lat.x_max = res->GetValue<float>(8, 0);
+        alt_lat.y_min = lon_lat.y_min = res->GetValue<float>(9, 0);
+        alt_lat.y_max = lon_lat.y_max = res->GetValue<float>(10, 0);
+        for (int i = 0; i < 5; i++)
+        {
+            float t = 0.1f + i * 0.2f;
+            auto ns = static_cast<int64_t>(time_alt.x_min + t * (time_alt.x_max - time_alt.x_min));
+            int64_t total_sec = ns / 1000000000LL;
+            int h = total_sec / 3600;
+            int m = (total_sec % 3600) / 60;
+            int s = total_sec % 60;
+            int ms = (ns % 1000000000LL) / 1000000LL;
+            time_alt.x_major_ticks[i] = std::format("{:02}:{:02}:{:02}.{:03}", h, m, s, ms);
+            lon_alt.x_major_ticks[i] = std::format("{:.4f}", lon_alt.x_min + t * (lon_alt.x_max - lon_alt.x_min));
+            lon_lat.x_major_ticks[i] = std::format("{:.4f}", lon_lat.x_min + t * (lon_lat.x_max - lon_lat.x_min));
+            lon_lat.y_major_ticks[4 - i] = std::format("{:.4f}", lon_lat.y_min + t * (lon_lat.y_max - lon_lat.y_min));
+            alt_lat.y_major_ticks[4 - i] = std::format("{:.4f}", alt_lat.y_min + t * (alt_lat.y_max - alt_lat.y_min));
+        }
+        for (int i = 0; i < 3; i++)
+        {
+            float t = 0.2f + i * 0.3f;
+            time_alt.y_major_ticks[2 - i] = std::format("{:.1f}", time_alt.y_min + t * (time_alt.y_max - time_alt.y_min));
+            lon_alt.y_major_ticks[2 - i] = std::format("{:.1f}", lon_alt.y_min + t * (lon_alt.y_max - lon_alt.y_min));
+            alt_hist.y_major_ticks[2 - i] = std::format("{:.1f}", alt_hist.y_min + t * (alt_hist.y_max - alt_hist.y_min));
+            alt_lat.x_major_ticks[i] = std::format("{:.1f}", alt_lat.x_min + t * (alt_lat.x_max - alt_lat.x_min));
+        }
+
+        // extracting info from sql query output
         while (auto chunk = res->Fetch())
         {
             auto &time_vec = chunk->data[0];
             auto &lon_vec = chunk->data[1];
             auto &lat_vec = chunk->data[2];
             auto &alt_vec = chunk->data[3];
+            auto &color_vec = chunk->data[4];
             float *time_data = duckdb::FlatVector::GetData<float>(time_vec);
             float *lon_data = duckdb::FlatVector::GetData<float>(lon_vec);
             float *lat_data = duckdb::FlatVector::GetData<float>(lat_vec);
             float *alt_data = duckdb::FlatVector::GetData<float>(alt_vec);
+            float *color_data = duckdb::FlatVector::GetData<float>(color_vec);
             size_t row_count = chunk->size();
             for (size_t i = 0; i < row_count; i++)
             {
-                const float lon = lon_data[i];
-                const float lat = lat_data[i];
-                const float alt = alt_data[i];
-                const float time = time_data[i];
-                const float color = time / time_alt.x_max;
-                time_alt_data.push_back(time);
-                time_alt_data.push_back(alt);
-                time_alt_data.push_back(color);
-                lon_alt_data.push_back(lon);
-                lon_alt_data.push_back(alt);
-                lon_alt_data.push_back(color);
-                lon_lat_data.push_back(lon);
-                lon_lat_data.push_back(lat);
-                lon_lat_data.push_back(color);
-                alt_lat_data.push_back(alt);
-                alt_lat_data.push_back(lat);
-                alt_lat_data.push_back(color);
+                vertex_data.emplace_back(time_data[i]);
+                vertex_data.emplace_back(lon_data[i]);
+                vertex_data.emplace_back(lat_data[i]);
+                vertex_data.emplace_back(alt_data[i]);
+                vertex_data.emplace_back(color_data[i]);
             }
         }
 
-        auto render = [&](Plot &plot_type, const std::vector<float> &data)
+        // populating the vbo
+        glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
+        glBufferData(GL_ARRAY_BUFFER, vertex_data.size() * sizeof(float), vertex_data.data(), GL_STATIC_DRAW);
+
+        auto render = [&](Plot &plot_type, int x_offset, int y_offset)
         {
-            glBindBuffer(GL_ARRAY_BUFFER, plot_type.vbo);
-            glBufferData(GL_ARRAY_BUFFER, data.size() * sizeof(float), data.data(), GL_STATIC_DRAW);
+            glBindVertexArray(graphics.vao);
+            glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
+            glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(x_offset * sizeof(float)));
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(y_offset * sizeof(float)));
+            glEnableVertexAttribArray(1);
+            glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(4 * sizeof(float)));
+            glEnableVertexAttribArray(2);
             glBindFramebuffer(GL_FRAMEBUFFER, plot_type.fbo);
             glViewport(0, 0, plot_type.width, plot_type.height);
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -179,22 +187,21 @@ void State::Draw(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
             glBindTexture(GL_TEXTURE_2D, graphics.colormap.texture);
             glUniform1i(glGetUniformLocation(graphics.shader_program, "colormaps"), 0);
             glUniform1i(glGetUniformLocation(graphics.shader_program, "cmap_index"), graphics.colormap.index);
-            glBindVertexArray(plot_type.vao);
             glDrawArrays(GL_POINTS, 0, graphics.sources);
             glBindVertexArray(0);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
         };
 
-        render(time_alt, time_alt_data);
-        render(lon_alt, lon_alt_data);
-        render(lon_lat, lon_lat_data);
-        render(alt_lat, alt_lat_data);
+        render(time_alt, 0, 3);
+        render(lon_alt, 1, 3);
+        render(lon_lat, 1, 2);
+        render(alt_lat, 3, 2);
 
-        status = "Plotted " + std::to_string(graphics.sources) + " sources with " + graphics.colormap.options[graphics.colormap.index] + " colormap";
+        status = "Plotted " + std::to_string(graphics.sources) + " sources with " + graphics.colormap.options[graphics.colormap.index] + " colormap in " + std::to_string(Performance()) + "ms";
     }
     else
     {
-        status = "Nothing to plot with current selection";
+        status = "Not enough data to plot with current selection";
     }
 }
 
@@ -202,4 +209,10 @@ void State::Clear()
 {
     // clearing all data in state.
     return;
+}
+
+int State::Performance()
+{
+    // returns ms since start_time
+    return (clock() - start_time) * 1000.0 / CLOCKS_PER_SEC;
 }

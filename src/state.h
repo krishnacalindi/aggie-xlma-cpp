@@ -17,18 +17,19 @@ struct State
     {
         struct ColorMap
         {
-            int index;
+            int index, by_index;
             GLuint texture;
             std::array<const char *, 5> options = {"Viridis", "Plasma", "Inferno", "Magma", "Cividis"};
+            std::array<const char *, 7> by_options = {"Time", "Event density", "log Event density", "Altitude", "Longitude", "Latitude", "log RF of sources"};
         };
-        GLuint shader_program;
+        GLuint shader_program, vao, vbo;
         bool initialized = false;
         ColorMap colormap;
         size_t sources = 0;
     };
     struct Plot
     {
-        GLuint texture, fbo, vao, vbo;
+        GLuint texture, fbo;
         float x_min, x_max, y_min, y_max;
         int width, height;
         std::array<std::string, 5> x_major_ticks = {"", "", "", "", ""};
@@ -48,14 +49,16 @@ struct State
     };
 
     std::string status = "Let's do this! :)";
+    double start_time;
     Filter filter;
     Graphics graphics;
     Plot time_alt, lon_alt, alt_hist, lon_lat, alt_lat;
-
+    
     // functions
     void Clear();                                                        // TODO: not fully implemented yet
     void Draw(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res); // plots data using the output of the filter_query
     void InitializeGraphics();                                           // initailzies the opengl shaders, colormaps, textures, etc.
+    int Performance();                                                // computes time since start of operation in ms
 };
 
 #endif

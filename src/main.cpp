@@ -1,6 +1,8 @@
+#define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
+#include "imgui_internal.h"
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <iostream>
@@ -9,39 +11,117 @@
 #include <duckdb.hpp>
 #include <regex>
 #include <state.h>
+#include <ctime>
+
+/*
+TODO:
+Interactivity with pan, zoom and selection
+Fix time axis (add relative min time)
+ENTLN
+animation
+let duck db handle all the coloring plottng etc
+*/
 
 duckdb::DuckDB db(nullptr); // in memory databse
 duckdb::Connection con(db); // connection to database
 static State state;         // state of application
-
+// rotation logic obtained from https://github.com/ocornut/imgui/issues/705
+inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, ImU32 text_color)
+{
+    pos.x = IM_ROUND(pos.x);
+    pos.y = IM_ROUND(pos.y);
+    ImFont *font = GImGui->Font;
+    const ImFontGlyph *glyph;
+    char c;
+    float scale = GImGui->FontSize / font->FontSize;
+    while ((c = *text++))
+    {
+        glyph = font->FindGlyph(c);
+        if (!glyph)
+            continue;
+        DrawList->PrimReserve(6, 4);
+        DrawList->PrimQuadUV(
+            pos + ImVec2(glyph->Y0, -glyph->X0) * scale,
+            pos + ImVec2(glyph->Y0, -glyph->X1) * scale,
+            pos + ImVec2(glyph->Y1, -glyph->X1) * scale,
+            pos + ImVec2(glyph->Y1, -glyph->X0) * scale,
+            ImVec2(glyph->U0, glyph->V0),
+            ImVec2(glyph->U1, glyph->V0),
+            ImVec2(glyph->U1, glyph->V1),
+            ImVec2(glyph->U0, glyph->V1),
+            text_color);
+        pos.y -= glyph->AdvanceX * scale;
+    }
+}
 void FilterLMA()
 {
-    std::string filter_query =
-        "WITH filtered AS ("
-        "  SELECT "
-        "    CAST(EPOCH_NS(datetime) AS DOUBLE) AS time, "
-        "    lon, "
-        "    lat, "
-        "    alt "
-        "  FROM lma "
-        "  WHERE number_stations >= " +
-        std::to_string(state.filter.min_stations) +
-        "    AND alt >= " + std::to_string(state.filter.min_alt) +
-        "    AND alt <= " + std::to_string(state.filter.max_alt) +
-        "    AND chi >= " + std::to_string(state.filter.min_chi) +
-        "    AND chi <= " + std::to_string(state.filter.max_chi) +
-        "    AND pdb >= " + std::to_string(state.filter.min_power) +
-        "    AND pdb <= " + std::to_string(state.filter.max_power) +
+    // updating plot column
+    std::string filter_query = "UPDATE lma SET plot = (number_stations >= " + std::to_string(state.filter.min_stations) +
+                               " AND alt >= " + std::to_string(state.filter.min_alt) +
+                               " AND alt <= " + std::to_string(state.filter.max_alt) +
+                               " AND chi >= " + std::to_string(state.filter.min_chi) +
+                               " AND chi <= " + std::to_string(state.filter.max_chi) +
+                               " AND pdb >= " + std::to_string(state.filter.min_power) +
+                               " AND pdb <= " + std::to_string(state.filter.max_power) + ");";
+    con.Query(filter_query);
+
+    // getting data
+
+    std::string color_query;
+    switch (state.graphics.colormap.by_index)
+    {
+    case 0:
+        color_query = "(time - b.min_time) / (b.max_time - b.min_time)";
+        break;
+    case 1:
+        color_query = "bin_count::FLOAT / d.max_c";
+        break;
+    case 2:
+        color_query = "LN(bin_count)::FLOAT / d.max_lc::FLOAT";
+        break;
+    case 3:
+        color_query = "(alt - b.min_alt) / (b.max_alt - b.min_alt)";
+        break;
+    case 4:
+        color_query = "(lon - b.min_lon) / (b.max_lon - b.min_lon)";
+        break;
+    case 5:
+        color_query = "(lat - b.min_lat) / (b.max_lat - b.min_lat)";
+        break;
+    case 6:
+        color_query = "(pdb - b.min_pdb) / (b.max_pdb - b.min_pdb)";
+        break;
+    }
+
+    std::string data_query =
+        "WITH bins AS ("
+        "SELECT FLOOR(lon / 0.01) AS bin_lon, FLOOR(lat / 0.01) AS bin_lat, COUNT(*) AS bin_count "
+        "FROM lma WHERE plot = true GROUP BY bin_lon, bin_lat"
+        "), "
+        "density AS ("
+        "SELECT MAX(bin_count) AS max_c, MAX(LN(bin_count)) AS max_lc FROM bins"
+        "), "
+        "times AS ("
+        "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time "
+        "FROM lma WHERE plot = true"
+        "), "
+        "bounds AS ("
+        "SELECT MIN(time) AS min_time, MAX(time) AS max_time, "
+        "MIN(lon) AS min_lon, MAX(lon) AS max_lon, "
+        "MIN(lat) AS min_lat, MAX(lat) AS max_lat, "
+        "MIN(alt) AS min_alt, MAX(alt) AS max_alt, "
+        "MIN(pdb) AS min_pdb, MAX(pdb) AS max_pdb FROM times"
         ") "
         "SELECT "
-        "  CAST(time - MIN(time) OVER () AS FLOAT) AS time, "
-        "  lon, lat, alt, "
-        "  MIN(time) OVER (), MAX(time) OVER (), "
-        "  MIN(lon) OVER (), MAX(lon) OVER (), "
-        "  MIN(lat) OVER (), MAX(lat) OVER (), "
-        "  MIN(alt) OVER (), MAX(alt) OVER () "
-        "FROM filtered";
-    auto result = con.Query(filter_query);
+        "  t.time, t.lon, t.lat, t.alt, " +
+        color_query + " AS color, "
+                      "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt, b.min_pdb, b.max_pdb "
+                      "FROM times t "
+                      "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
+                      "CROSS JOIN density d "
+                      "CROSS JOIN bounds b";
+
+    auto result = con.Query(data_query);
     state.Draw(result);
 }
 
@@ -62,11 +142,11 @@ void RenderUI()
                                      .result();
                 if (!selection.empty())
                 {
-                    state.status = "loading files";
+                    state.start_time = clock();
                     try
                     {
                         con.Query("DROP TABLE IF EXISTS lma");
-                        con.Query("CREATE TABLE lma (datetime TIMESTAMP_NS, lat FLOAT, lon FLOAT, alt FLOAT, chi FLOAT, pdb FLOAT, number_stations UTINYINT)");
+                        con.Query("CREATE TABLE lma (datetime TIMESTAMP_NS, lat FLOAT, lon FLOAT, alt FLOAT, chi FLOAT, pdb FLOAT, number_stations UTINYINT, plot BOOLEAN)");
 
                         std::regex date_pattern(R"(.*\w+_(\d+)_\d+_\d+\.dat)");
                         std::unordered_map<int64_t, std::vector<std::string>> files_by_day; // grouping files per day to take advantage of DuckDB multi file reading
@@ -90,7 +170,7 @@ void RenderUI()
                                 tm.tm_sec = 0;
                                 std::time_t time_t_value = std::mktime(&tm);
                                 int64_t ns_since_epoch = static_cast<int64_t>(time_t_value);
-                                files_by_day[ns_since_epoch].push_back(filepath);
+                                files_by_day[ns_since_epoch].emplace_back(filepath);
                             }
                         }
 
@@ -335,7 +415,8 @@ void RenderUI()
     ImGui::Text("Maps");
     ImGui::Text("Colors");
 
-    ImGui::Combo("Colormaps", &state.graphics.colormap.index, state.graphics.colormap.options.data(), state.graphics.colormap.options.size()); // not dynamic yet
+    ImGui::Combo("Colormaps", &state.graphics.colormap.index, state.graphics.colormap.options.data(), state.graphics.colormap.options.size());         // not dynamic yet
+    ImGui::Combo("Color by", &state.graphics.colormap.by_index, state.graphics.colormap.by_options.data(), state.graphics.colormap.by_options.size()); // not dynamic yet
     ImGui::Text("Animation");
     ImGui::EndChild();
 
@@ -343,7 +424,7 @@ void RenderUI()
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::BeginChild("##Plots", ImVec2(0, 0), ImGuiChildFlags_Borders);
-    float fixed_plot_height = ImGui::GetContentRegionAvail().y * 0.15f;
+    float fixed_plot_height = ImGui::GetContentRegionAvail().y * 0.18f;
     float fixed_plot_width = ImGui::GetContentRegionAvail().x * 0.8f;
     float axis_size = ImGui::GetFontSize() * 1.8f;
     float tick_height = ImGui::GetFontSize() * 0.4f;
@@ -358,22 +439,15 @@ void RenderUI()
         {
             ImDrawList *draw_list = ImGui::GetWindowDrawList();
             ImVec2 p = ImGui::GetWindowPos();
-            float tick_positions[] = {0.1f, 0.5f, 0.9f};
-            for (int i = 0; i < 5; i++)
+            float tick_positions[] = {0.2f, 0.5f, 0.8f};
+            for (int i = 0; i < 3; i++)
             {
                 float y = p.y + tick_positions[i] * state.time_alt.height;
                 float x = p.x + axis_size;
                 draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
                 const char *label = state.time_alt.y_major_ticks[i].c_str();
-                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
-                float char_x = x - tick_height - ImGui::GetFontSize();
-                for (const char *c = label; *c != '\0'; c++)
-                {
-                    char temp[2] = {*c, '\0'};
-                    ImVec2 char_size = ImGui::CalcTextSize(temp);
-                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
-                    char_y += char_size.x;
-                }
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
             }
         }
         ImGui::EndChild();
@@ -410,22 +484,15 @@ void RenderUI()
         {
             ImDrawList *draw_list = ImGui::GetWindowDrawList();
             ImVec2 p = ImGui::GetWindowPos();
-            float tick_positions[] = {0.1f, 0.5f, 0.9f};
-            for (int i = 0; i < 5; i++)
+            float tick_positions[] = {0.2f, 0.5f, 0.8f};
+            for (int i = 0; i < 3; i++)
             {
                 float y = p.y + tick_positions[i] * state.lon_alt.height;
                 float x = p.x + axis_size;
                 draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
                 const char *label = state.lon_alt.y_major_ticks[i].c_str();
-                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
-                float char_x = x - tick_height - ImGui::GetFontSize();
-                for (const char *c = label; *c != '\0'; c++)
-                {
-                    char temp[2] = {*c, '\0'};
-                    ImVec2 char_size = ImGui::CalcTextSize(temp);
-                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
-                    char_y += char_size.x;
-                }
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
             }
         }
         ImGui::EndChild();
@@ -463,22 +530,15 @@ void RenderUI()
         {
             ImDrawList *draw_list = ImGui::GetWindowDrawList();
             ImVec2 p = ImGui::GetWindowPos();
-            float tick_positions[] = {0.1f, 0.5f, 0.9f};
-            for (int i = 0; i < 5; i++)
+            float tick_positions[] = {0.2f, 0.5f, 0.8f};
+            for (int i = 0; i < 3; i++)
             {
                 float y = p.y + tick_positions[i] * state.alt_hist.height;
                 float x = p.x + axis_size;
                 draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
                 const char *label = state.alt_hist.y_major_ticks[i].c_str();
-                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
-                float char_x = x - tick_height - ImGui::GetFontSize();
-                for (const char *c = label; *c != '\0'; c++)
-                {
-                    char temp[2] = {*c, '\0'};
-                    ImVec2 char_size = ImGui::CalcTextSize(temp);
-                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
-                    char_y += char_size.x;
-                }
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
             }
         }
         ImGui::EndChild();
@@ -491,8 +551,8 @@ void RenderUI()
         {
             ImDrawList *draw_list = ImGui::GetWindowDrawList();
             ImVec2 p = ImGui::GetWindowPos();
-            float tick_positions[] = {0.1f, 0.5f, 0.9f};
-            for (int i = 0; i < 5; i++)
+            float tick_positions[] = {0.2f, 0.5f, 0.8f};
+            for (int i = 0; i < 3; i++)
             {
                 float x = p.x + tick_positions[i] * state.alt_hist.width;
                 draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
@@ -522,15 +582,8 @@ void RenderUI()
                 float x = p.x + axis_size;
                 draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
                 const char *label = state.lon_lat.y_major_ticks[i].c_str();
-                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
-                float char_x = x - tick_height - ImGui::GetFontSize();
-                for (const char *c = label; *c != '\0'; c++)
-                {
-                    char temp[2] = {*c, '\0'};
-                    ImVec2 char_size = ImGui::CalcTextSize(temp);
-                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
-                    char_y += char_size.x;
-                }
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
             }
         }
         ImGui::EndChild();
@@ -575,15 +628,8 @@ void RenderUI()
                 float x = p.x + axis_size;
                 draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
                 const char *label = state.alt_lat.y_major_ticks[i].c_str();
-                float char_y = y - ImGui::CalcTextSize(label).x * 0.5f;
-                float char_x = x - tick_height - ImGui::GetFontSize();
-                for (const char *c = label; *c != '\0'; c++)
-                {
-                    char temp[2] = {*c, '\0'};
-                    ImVec2 char_size = ImGui::CalcTextSize(temp);
-                    draw_list->AddText(ImVec2(char_x, char_y), IM_COL32(255, 255, 255, 255), temp);
-                    char_y += char_size.x;
-                }
+                ImVec2 text_size = ImGui::CalcTextSize(label);
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
             }
         }
         ImGui::EndChild();
@@ -596,8 +642,8 @@ void RenderUI()
         {
             ImDrawList *draw_list = ImGui::GetWindowDrawList();
             ImVec2 p = ImGui::GetWindowPos();
-            float tick_positions[] = {0.1f, 0.5f, 0.9f};
-            for (int i = 0; i < 5; i++)
+            float tick_positions[] = {0.2f, 0.5f, 0.8f};
+            for (int i = 0; i < 3; i++)
             {
                 float x = p.x + tick_positions[i] * state.alt_lat.width;
                 draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
