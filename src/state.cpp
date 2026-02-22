@@ -230,7 +230,7 @@ void State::Render()
             glBindTexture(GL_TEXTURE_2D, graphics.colormap.texture);
             glUniform1i(glGetUniformLocation(graphics.shader_program, "colormaps"), 0);
             glUniform1i(glGetUniformLocation(graphics.shader_program, "cmap_index"), graphics.colormap.index);
-            glDrawArrays(GL_POINTS, 0, graphics.sources);
+            glDrawArrays(GL_POINTS, 0, anime.animating ? anime.sources : graphics.sources);
             glBindVertexArray(0);
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
         };
@@ -240,6 +240,24 @@ void State::Render()
         render(lon_lat, 1, 2);
         render(alt_lat, 3, 2);
         status = "Plotted " + std::to_string(graphics.sources) + " sources with " + graphics.colormap.options[graphics.colormap.index] + " colormap in " + std::to_string(timer.End()) + "ms";
+    }
+}
+
+void State::Frame()
+{
+    if (anime.animating && graphics.sources > 1)
+    {
+        float elapsed = (float)anime.Elapsed() / anime.duration_ms;
+        if (elapsed <= 1)
+        {
+            anime.sources = (size_t)(std::min(elapsed, 1.0f) * graphics.sources);
+            Render();
+        }
+        else
+        {
+            anime.End();
+            Render(); // final render to ensure everything is plotted
+        }
     }
 }
 

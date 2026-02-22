@@ -17,7 +17,9 @@
 TODO:
 Interactivity with pan, zoom and selection
 ENTLN
-animation
+maps
+features
+sizes for dots and entln
 */
 
 duckdb::DuckDB db(nullptr); // in memory databse
@@ -74,7 +76,7 @@ std::string ColorBy()
         return "(time - b.min_time) / (b.max_time - b.min_time)";
     }
 }
-// helper for filtering and drawing
+// filter helper
 void Filter()
 {
     // updating plot column
@@ -109,12 +111,12 @@ void Filter()
         ") "
         "SELECT t.time, t.lon, t.lat, t.alt, " +
         ColorBy() + " AS color, "
-                        "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt, b.min_pdb, b.max_pdb "
-                        "FROM times t "
-                        "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
-                        "CROSS JOIN density d "
-                        "CROSS JOIN bounds b "
-                        "ORDER BY t.time";
+                    "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt, b.min_pdb, b.max_pdb "
+                    "FROM times t "
+                    "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
+                    "CROSS JOIN density d "
+                    "CROSS JOIN bounds b "
+                    "ORDER BY t.time";
     auto result = con.Query(data_query);
     state.ProcessResult(result);
 }
@@ -271,6 +273,8 @@ void RenderUI()
         {
             if (ImGui::MenuItem("Animate"))
             {
+                state.timer.Start();
+                state.anime.Start();
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Start animation playback.");
@@ -438,16 +442,17 @@ void RenderUI()
             ") "
             "SELECT " +
             ColorBy() + " AS color "
-                            "FROM times t "
-                            "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
-                            "CROSS JOIN density d "
-                            "CROSS JOIN bounds b "
-                            "ORDER BY t.time";
+                        "FROM times t "
+                        "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
+                        "CROSS JOIN density d "
+                        "CROSS JOIN bounds b "
+                        "ORDER BY t.time";
 
         auto result = con.Query(color_query);
         state.ProcessColor(result);
     }
     ImGui::Text("Animation");
+    ImGui::InputInt("Duration", &state.anime.duration);
     ImGui::EndChild();
 
     ImGui::SameLine();
@@ -748,7 +753,8 @@ int main()
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-
+        if (state.anime.animating) // animation handler has to work per frame of UI renderer
+            state.Frame();
         RenderUI();
 
         ImGui::Render();

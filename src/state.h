@@ -62,9 +62,36 @@ struct State
             return (clock() - start_time) * 1000.0 / CLOCKS_PER_SEC;
         }
     };
+    struct Anime
+    {
+        int duration = 5, duration_ms; // duration_ms for convenience
+        size_t sources;                // how many sources to display this frame
+        clock_t start;                 // when animation started
+        bool animating = false;
+
+        void Start()
+        {
+            start = clock();
+            animating = true;
+            duration_ms = duration * 1000;
+        }
+
+        int Elapsed()
+        {
+            // returns ms since start of animation
+            return (clock() - start) * 1000.0 / CLOCKS_PER_SEC;
+        }
+
+        void End()
+        {
+            animating = false;
+        }
+    };
 
     std::string status = "Let's do this! :)";
+    int animation_timer = 5;
     Timer timer;
+    Anime anime;
     Filter filter;
     Graphics graphics;
     Plot time_alt, lon_alt, alt_hist, lon_lat, alt_lat;
@@ -74,6 +101,7 @@ struct State
     void ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res); // populates vbo and sets up the axes
     void ProcessColor(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res);  // edits vbo with new color bys
     void Render();                                                                // renders the points in OpenGL
+    void Frame();                                                               // render a frame of animation
     void InitializeGraphics();                                                    // initailzies the opengl shaders, colormaps, textures, etc.
 };
 
