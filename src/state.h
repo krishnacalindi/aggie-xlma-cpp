@@ -47,18 +47,34 @@ struct State
         float min_power = -60.0;
         float max_power = 60.0;
     };
+    struct Timer
+    {
+        clock_t start_time;
+
+        void Start()
+        {
+            start_time = clock();
+        }
+
+        int End()
+        {
+            // returns ms since start_time
+            return (clock() - start_time) * 1000.0 / CLOCKS_PER_SEC;
+        }
+    };
 
     std::string status = "Let's do this! :)";
-    double start_time;
+    Timer timer;
     Filter filter;
     Graphics graphics;
     Plot time_alt, lon_alt, alt_hist, lon_lat, alt_lat;
-    
+
     // functions
-    void Clear();                                                        // TODO: not fully implemented yet
-    void Draw(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res); // plots data using the output of the filter_query
-    void InitializeGraphics();                                           // initailzies the opengl shaders, colormaps, textures, etc.
-    int Performance();                                                // computes time since start of operation in ms
+    void Clear();                                                                 // TODO: not fully implemented yet
+    void ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res); // populates vbo and sets up the axes
+    void ProcessColor(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res);  // edits vbo with new color bys
+    void Render();                                                                // renders the points in OpenGL
+    void InitializeGraphics();                                                    // initailzies the opengl shaders, colormaps, textures, etc.
 };
 
 #endif

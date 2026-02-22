@@ -90,7 +90,7 @@ void main() {
     // loading map data
 }
 
-void State::Draw(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
+void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
 {
     // initializing opengl stuff
     if (!graphics.initialized)
@@ -165,6 +165,49 @@ void State::Draw(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
         glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
         glBufferData(GL_ARRAY_BUFFER, vertex_data.size() * sizeof(float), vertex_data.data(), GL_STATIC_DRAW);
 
+        // rendering the points
+        Render();
+    }
+    else
+        status = "Not enough data to plot with current selection";
+}
+
+void State::ProcessColor(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
+{
+    if (res->RowCount() == graphics.sources)
+    {
+        if (graphics.sources > 1) // to prevent axis collapse from min and max being equal
+        {
+            // using pointer to change values in memory
+            glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
+            float *vbo_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+            size_t chunk_i = 0; // global index
+            while (auto chunk = res->Fetch())
+            {
+                auto &color_vec = chunk->data[0];
+                float *color_data = duckdb::FlatVector::GetData<float>(color_vec);
+                size_t row_count = chunk->size();
+                for (size_t i = 0; i < row_count; i++)
+                {
+                    vbo_ptr[((chunk_i + i)) * 5 + 4] = color_data[i];
+                }
+                chunk_i += row_count;
+            }
+            glUnmapBuffer(GL_ARRAY_BUFFER);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+            //  rendering the points
+            Render();
+        }
+    }
+    else
+        status = std::string("Color by ") + graphics.colormap.by_options[graphics.colormap.by_index] + " failed";
+}
+
+void State::Render()
+{
+    if (graphics.sources > 1)
+    {
         auto render = [&](Plot &plot_type, int x_offset, int y_offset)
         {
             glBindVertexArray(graphics.vao);
@@ -173,7 +216,7 @@ void State::Draw(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
             glEnableVertexAttribArray(0);
             glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(y_offset * sizeof(float)));
             glEnableVertexAttribArray(1);
-            glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(4 * sizeof(float)));
+            glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(4 * sizeof(float)));
             glEnableVertexAttribArray(2);
             glBindFramebuffer(GL_FRAMEBUFFER, plot_type.fbo);
             glViewport(0, 0, plot_type.width, plot_type.height);
@@ -196,12 +239,7 @@ void State::Draw(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
         render(lon_alt, 1, 3);
         render(lon_lat, 1, 2);
         render(alt_lat, 3, 2);
-
-        status = "Plotted " + std::to_string(graphics.sources) + " sources with " + graphics.colormap.options[graphics.colormap.index] + " colormap in " + std::to_string(Performance()) + "ms";
-    }
-    else
-    {
-        status = "Not enough data to plot with current selection";
+        status = "Plotted " + std::to_string(graphics.sources) + " sources with " + graphics.colormap.options[graphics.colormap.index] + " colormap in " + std::to_string(timer.End()) + "ms";
     }
 }
 
@@ -209,10 +247,4 @@ void State::Clear()
 {
     // clearing all data in state.
     return;
-}
-
-int State::Performance()
-{
-    // returns ms since start_time
-    return (clock() - start_time) * 1000.0 / CLOCKS_PER_SEC;
 }

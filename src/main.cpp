@@ -16,10 +16,8 @@
 /*
 TODO:
 Interactivity with pan, zoom and selection
-Fix time axis (add relative min time)
 ENTLN
 animation
-let duck db handle all the coloring plottng etc
 */
 
 duckdb::DuckDB db(nullptr); // in memory databse
@@ -53,7 +51,31 @@ inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, 
         pos.y -= glyph->AdvanceX * scale;
     }
 }
-void FilterLMA()
+// helper for color by
+std::string ColorBy()
+{
+    switch (state.graphics.colormap.by_index)
+    {
+    case 0:
+        return "(time - b.min_time) / (b.max_time - b.min_time)";
+    case 1:
+        return "bin_count::FLOAT / d.max_c";
+    case 2:
+        return "LN(bin_count)::FLOAT / d.max_lc::FLOAT";
+    case 3:
+        return "(alt - b.min_alt) / (b.max_alt - b.min_alt)";
+    case 4:
+        return "(lon - b.min_lon) / (b.max_lon - b.min_lon)";
+    case 5:
+        return "(lat - b.min_lat) / (b.max_lat - b.min_lat)";
+    case 6:
+        return "(pdb - b.min_pdb) / (b.max_pdb - b.min_pdb)";
+    default:
+        return "(time - b.min_time) / (b.max_time - b.min_time)";
+    }
+}
+// helper for filtering and drawing
+void Filter()
 {
     // updating plot column
     std::string filter_query = "UPDATE lma SET plot = (number_stations >= " + std::to_string(state.filter.min_stations) +
@@ -66,33 +88,6 @@ void FilterLMA()
     con.Query(filter_query);
 
     // getting data
-
-    std::string color_query;
-    switch (state.graphics.colormap.by_index)
-    {
-    case 0:
-        color_query = "(time - b.min_time) / (b.max_time - b.min_time)";
-        break;
-    case 1:
-        color_query = "bin_count::FLOAT / d.max_c";
-        break;
-    case 2:
-        color_query = "LN(bin_count)::FLOAT / d.max_lc::FLOAT";
-        break;
-    case 3:
-        color_query = "(alt - b.min_alt) / (b.max_alt - b.min_alt)";
-        break;
-    case 4:
-        color_query = "(lon - b.min_lon) / (b.max_lon - b.min_lon)";
-        break;
-    case 5:
-        color_query = "(lat - b.min_lat) / (b.max_lat - b.min_lat)";
-        break;
-    case 6:
-        color_query = "(pdb - b.min_pdb) / (b.max_pdb - b.min_pdb)";
-        break;
-    }
-
     std::string data_query =
         "WITH bins AS ("
         "SELECT FLOOR(lon / 0.01) AS bin_lon, FLOOR(lat / 0.01) AS bin_lat, COUNT(*) AS bin_count "
@@ -112,17 +107,16 @@ void FilterLMA()
         "MIN(alt) AS min_alt, MAX(alt) AS max_alt, "
         "MIN(pdb) AS min_pdb, MAX(pdb) AS max_pdb FROM times"
         ") "
-        "SELECT "
-        "  t.time, t.lon, t.lat, t.alt, " +
-        color_query + " AS color, "
-                      "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt, b.min_pdb, b.max_pdb "
-                      "FROM times t "
-                      "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
-                      "CROSS JOIN density d "
-                      "CROSS JOIN bounds b";
-
+        "SELECT t.time, t.lon, t.lat, t.alt, " +
+        ColorBy() + " AS color, "
+                        "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt, b.min_pdb, b.max_pdb "
+                        "FROM times t "
+                        "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
+                        "CROSS JOIN density d "
+                        "CROSS JOIN bounds b "
+                        "ORDER BY t.time";
     auto result = con.Query(data_query);
-    state.Draw(result);
+    state.ProcessResult(result);
 }
 
 void RenderUI()
@@ -142,7 +136,7 @@ void RenderUI()
                                      .result();
                 if (!selection.empty())
                 {
-                    state.start_time = clock();
+                    state.timer.Start();
                     try
                     {
                         con.Query("DROP TABLE IF EXISTS lma");
@@ -206,7 +200,7 @@ void RenderUI()
                                             ") t;");
                         }
                         state.status = "Loaded " + std::to_string(selection.size()) + " files";
-                        FilterLMA();
+                        Filter();
                     }
                     catch (const std::exception &e)
                     {
@@ -381,42 +375,78 @@ void RenderUI()
     ImGui::Text("Filters");
     if (ImGui::InputFloat("Min. Stations", &state.filter.min_stations))
     {
-        FilterLMA();
+        Filter();
     }
     if (ImGui::InputFloat("Min. Altitude", &state.filter.min_alt))
     {
-        FilterLMA();
+        Filter();
     }
 
     if (ImGui::InputFloat("Max. Altitude", &state.filter.max_alt))
     {
-        FilterLMA();
+        Filter();
     }
 
     if (ImGui::InputFloat("Min. Chi", &state.filter.min_chi))
     {
-        FilterLMA();
+        Filter();
     }
 
     if (ImGui::InputFloat("Max. Chi", &state.filter.max_chi))
     {
-        FilterLMA();
+        Filter();
     }
 
     if (ImGui::InputFloat("Min. Power", &state.filter.min_power))
     {
-        FilterLMA();
+        Filter();
     }
 
     if (ImGui::InputFloat("Max. Power", &state.filter.max_power))
     {
-        FilterLMA();
+        Filter();
     }
     ImGui::Text("Maps");
     ImGui::Text("Colors");
 
-    ImGui::Combo("Colormaps", &state.graphics.colormap.index, state.graphics.colormap.options.data(), state.graphics.colormap.options.size());         // not dynamic yet
-    ImGui::Combo("Color by", &state.graphics.colormap.by_index, state.graphics.colormap.by_options.data(), state.graphics.colormap.by_options.size()); // not dynamic yet
+    if (ImGui::Combo("Colormaps", &state.graphics.colormap.index, state.graphics.colormap.options.data(), state.graphics.colormap.options.size()))
+    {
+        state.timer.Start();
+        state.Render();
+    }
+    if (ImGui::Combo("Color by", &state.graphics.colormap.by_index, state.graphics.colormap.by_options.data(), state.graphics.colormap.by_options.size()))
+    {
+        state.timer.Start();
+        std::string color_query =
+            "WITH bins AS ("
+            "SELECT FLOOR(lon / 0.01) AS bin_lon, FLOOR(lat / 0.01) AS bin_lat, COUNT(*) AS bin_count "
+            "FROM lma WHERE plot = true GROUP BY bin_lon, bin_lat"
+            "), "
+            "density AS ("
+            "SELECT MAX(bin_count) AS max_c, MAX(LN(bin_count)) AS max_lc FROM bins"
+            "), "
+            "times AS ("
+            "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time "
+            "FROM lma WHERE plot = true"
+            "), "
+            "bounds AS ("
+            "SELECT MIN(time) AS min_time, MAX(time) AS max_time, "
+            "MIN(lon) AS min_lon, MAX(lon) AS max_lon, "
+            "MIN(lat) AS min_lat, MAX(lat) AS max_lat, "
+            "MIN(alt) AS min_alt, MAX(alt) AS max_alt, "
+            "MIN(pdb) AS min_pdb, MAX(pdb) AS max_pdb FROM times"
+            ") "
+            "SELECT " +
+            ColorBy() + " AS color "
+                            "FROM times t "
+                            "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
+                            "CROSS JOIN density d "
+                            "CROSS JOIN bounds b "
+                            "ORDER BY t.time";
+
+        auto result = con.Query(color_query);
+        state.ProcessColor(result);
+    }
     ImGui::Text("Animation");
     ImGui::EndChild();
 
