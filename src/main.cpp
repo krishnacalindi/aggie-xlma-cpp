@@ -61,16 +61,18 @@ std::string ColorBy()
     case 0:
         return "(time - b.min_time) / (b.max_time - b.min_time)";
     case 1:
-        return "bin_count::FLOAT / d.max_c";
+        return "(t.row_idx - 1)::FLOAT / (t.total_rows - 1)::FLOAT";
     case 2:
-        return "LN(bin_count)::FLOAT / d.max_lc::FLOAT";
+        return "bin_count::FLOAT / d.max_c";
     case 3:
-        return "(alt - b.min_alt) / (b.max_alt - b.min_alt)";
+        return "LN(bin_count)::FLOAT / d.max_lc::FLOAT";
     case 4:
-        return "(lon - b.min_lon) / (b.max_lon - b.min_lon)";
+        return "(alt - b.min_alt) / (b.max_alt - b.min_alt)";
     case 5:
-        return "(lat - b.min_lat) / (b.max_lat - b.min_lat)";
+        return "(lon - b.min_lon) / (b.max_lon - b.min_lon)";
     case 6:
+        return "(lat - b.min_lat) / (b.max_lat - b.min_lat)";
+    case 7:
         return "(pdb - b.min_pdb) / (b.max_pdb - b.min_pdb)";
     default:
         return "(time - b.min_time) / (b.max_time - b.min_time)";
@@ -99,7 +101,9 @@ void Filter()
         "SELECT MAX(bin_count) AS max_c, MAX(LN(bin_count)) AS max_lc FROM bins"
         "), "
         "times AS ("
-        "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time "
+        "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time, "
+        "ROW_NUMBER() OVER (ORDER BY datetime) AS row_idx, "
+        "COUNT(*) OVER () AS total_rows "
         "FROM lma WHERE plot = true"
         "), "
         "bounds AS ("
@@ -119,6 +123,18 @@ void Filter()
                     "ORDER BY t.time";
     auto result = con.Query(data_query);
     state.ProcessResult(result);
+
+    // histogram (done seperately as size of output differs)
+    std::string hist_query = "SELECT "
+                             "FLOOR(alt / 0.1) * 0.1 AS bin, "
+                             "COUNT(*)::FLOAT AS count, "
+                             "MIN(COUNT(*)) OVER() AS min_count, "
+                             "MAX(COUNT(*)) OVER() AS max_count "
+                             "FROM lma "
+                             "WHERE plot = true AND alt >= 0 AND alt <= 20 GROUP BY bin "
+                             "ORDER BY bin";
+    result = con.Query(hist_query);
+    state.Histogram(result);
 }
 
 void RenderUI()
@@ -410,7 +426,12 @@ void RenderUI()
     {
         Filter();
     }
-    ImGui::Text("Maps");
+    ImGui::Text("Layers");
+    if (ImGui::Combo("Maps", &state.graphics.map.index, state.graphics.map.options.data(), state.graphics.map.options.size()))
+    {
+        state.timer.Start();
+        state.Render();
+    }
     ImGui::Text("Colors");
 
     if (ImGui::Combo("Colormaps", &state.graphics.colormap.index, state.graphics.colormap.options.data(), state.graphics.colormap.options.size()))
@@ -430,7 +451,9 @@ void RenderUI()
             "SELECT MAX(bin_count) AS max_c, MAX(LN(bin_count)) AS max_lc FROM bins"
             "), "
             "times AS ("
-            "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time "
+            "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time, "
+            "ROW_NUMBER() OVER (ORDER BY datetime) AS row_idx, "
+            "COUNT(*) OVER () AS total_rows "
             "FROM lma WHERE plot = true"
             "), "
             "bounds AS ("

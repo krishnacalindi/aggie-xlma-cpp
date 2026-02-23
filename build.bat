@@ -1,7 +1,5 @@
 @echo off
 
-@REM if exist build rmdir /s /q build
-
 cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=C:/Users/krish/vcpkg/scripts/buildsystems/vcpkg.cmake
 if %ERRORLEVEL% NEQ 0 exit /b %ERRORLEVEL%
 
