@@ -332,13 +332,13 @@ void State::Render()
 {
     if (graphics.sources > 1)
     {
-        auto render = [&](Plot &plot_type, int x_offset, int y_offset)
+        auto render = [&](Plot &plot_type, bool render_maps = false)
         {
             glBindFramebuffer(GL_FRAMEBUFFER, plot_type.fbo);
             glViewport(0, 0, plot_type.width, plot_type.height);
             glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
-            if (x_offset == 1 && y_offset == 2) // lon lat plot special: map, features, stations
+            if (render_maps) // lon lat plot special: map, features, stations
             {
                 glBindVertexArray(graphics.map.vao);
                 glUseProgram(graphics.line_shader);
@@ -348,13 +348,6 @@ void State::Render()
                 glBindVertexArray(0);
             }
             glBindVertexArray(plot_type.vao);
-            // glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
-            // glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(x_offset * sizeof(float)));
-            // glEnableVertexAttribArray(0);
-            // glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(y_offset * sizeof(float)));
-            // glEnableVertexAttribArray(1);
-            // glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(4 * sizeof(float)));
-            // glEnableVertexAttribArray(2);
             glUseProgram(graphics.vhf_shader);
             glEnable(GL_PROGRAM_POINT_SIZE);
             glm::mat4 proj = glm::ortho(plot_type.x_min, plot_type.x_max, plot_type.y_max, plot_type.y_min, -1.0f, 1.0f);
@@ -368,10 +361,10 @@ void State::Render()
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
         };
 
-        render(time_alt, 0, 3);
-        render(lon_alt, 1, 3);
-        render(lon_lat, 1, 2);
-        render(alt_lat, 3, 2);
+        render(time_alt);
+        render(lon_alt);
+        render(lon_lat, true);
+        render(alt_lat);
         status = "Plotted " + std::to_string(graphics.sources) + " sources with " + graphics.colormap.options[graphics.colormap.index] + " colormap in " + std::to_string(timer.End()) + "ms";
     }
 }
