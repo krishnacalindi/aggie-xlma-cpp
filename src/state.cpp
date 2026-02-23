@@ -365,7 +365,7 @@ void State::Render()
         render(lon_alt);
         render(lon_lat, true);
         render(alt_lat);
-        status = "Plotted " + std::to_string(graphics.sources) + " sources with " + graphics.colormap.options[graphics.colormap.index] + " colormap in " + std::to_string(timer.End()) + "ms";
+        status = "Plotted " + std::to_string(graphics.sources) + " sources in " + std::to_string(timer.End()) + "ms";
     }
 }
 
