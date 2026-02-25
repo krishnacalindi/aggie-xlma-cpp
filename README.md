@@ -11,3 +11,5 @@ If you would like to contribute please reach out to [Dr.Timothy Logan](https://a
 
 ## References:
 McCaul , E. W., S. J. Goodman, K. M. LaCasse, and D. J. Cecil, 2009: Forecasting Lightning Threat Using Cloud-Resolving Model Simulations. Wea. Forecasting, 24, 709–729, https://doi.org/10.1175/2008WAF2222152.1.
+
+gif.h: Obtained from [here](https://github.com/charlietangora/gif-h)
