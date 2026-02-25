@@ -1,9 +1,10 @@
 #include "state.h"
 #include <format>
 
-void State::InitializeGraphics()
+void State::SetVHFShader()
 {
-    const char *vhf_vert = R"(
+
+    std::string vhf_vert = std::string(R"(
 #version 330 core
 layout(location = 0) in float x_pos;
 layout(location = 1) in float y_pos;
@@ -12,10 +13,12 @@ uniform mat4 projection;
 out float vValue;
 void main() {
     gl_Position = projection * vec4(x_pos, y_pos, 0.0, 1.0);
-    gl_PointSize = 1.0;
+    gl_PointSize = )") + std::to_string(theme.vhf_size) +
+                           R"(.0;
     vValue = value;
 }
 )";
+    const char *vhf_vert_ptr = vhf_vert.c_str();
 
     const char *vhf_frag = R"(
 #version 330 core
@@ -23,35 +26,19 @@ in float vValue;
 out vec4 FragColor;
 uniform sampler2D colormaps;
 uniform int cmap_index;
-
 void main() {
+    if (length(gl_PointCoord - vec2(0.5)) > 0.5)
+        discard;
     float y = (float(cmap_index) + 0.5) / 5.0;
     FragColor = texture(colormaps, vec2(vValue, y));
     FragColor.a = 1.0;
 }
 )";
 
-    const char *line_vert = R"(
-#version 330 core
-layout(location = 0) in float x_pos;
-layout(location = 1) in float y_pos;
-uniform mat4 projection;
-void main() {
-    gl_Position = projection * vec4(x_pos, y_pos, 0.0, 1.0);
-}
-)";
-
-    const char *line_frag = R"(
-#version 330 core
-out vec4 FragColor;
-void main() {
-    FragColor = vec4(1.0);
-}
-)";
-
     // vhf source shader
+    glDeleteProgram(graphics.vhf_shader);
     GLuint vhf_vert_shader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vhf_vert_shader, 1, &vhf_vert, nullptr);
+    glShaderSource(vhf_vert_shader, 1, &vhf_vert_ptr, nullptr);
     glCompileShader(vhf_vert_shader);
     GLuint vhf_frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(vhf_frag_shader, 1, &vhf_frag, nullptr);
@@ -63,12 +50,39 @@ void main() {
     glDeleteShader(vhf_vert_shader);
     glDeleteShader(vhf_frag_shader);
 
+    // rendering
+    Render(); // in the beginnning this is harmless as sources.graphics is 0
+}
+
+void State::SetLineShader()
+{
+    const char *line_vert = R"(
+#version 330 core
+layout(location = 0) in float x_pos;
+layout(location = 1) in float y_pos;
+uniform mat4 projection;
+void main() {
+    gl_Position = projection * vec4(x_pos, y_pos, 0.0, 1.0);
+}
+)";
+
+    std::string line_frag = std::string(R"(
+    #version 330 core
+    out vec4 FragColor;
+    void main() {
+        FragColor = vec4()") +
+                            std::to_string(theme.diff_color_f) + R"();
+    }
+)";
+    const char *line_frag_ptr = line_frag.c_str();
+
     // line shader
+    glDeleteProgram(graphics.line_shader);
     GLuint line_vert_shader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(line_vert_shader, 1, &line_vert, nullptr);
     glCompileShader(line_vert_shader);
     GLuint line_frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(line_frag_shader, 1, &line_frag, nullptr);
+    glShaderSource(line_frag_shader, 1, &line_frag_ptr, nullptr);
     glCompileShader(line_frag_shader);
     graphics.line_shader = glCreateProgram();
     glAttachShader(graphics.line_shader, line_vert_shader);
@@ -76,6 +90,26 @@ void main() {
     glLinkProgram(graphics.line_shader);
     glDeleteShader(line_vert_shader);
     glDeleteShader(line_frag_shader);
+
+    // rendering
+    Render(); // in the beginnning this is harmless as sources.graphics is 0
+}
+
+void State::Flip()
+{
+    timer.Start();
+    bool is_dark = theme.dark == 1;
+    theme.color_32 = is_dark ? 255 : 0;
+    theme.same_color_f = is_dark ? 0.0f : 1.0f;
+    theme.diff_color_f = is_dark ? 1.0f : 0.0f;
+    SetLineShader();
+}
+
+void State::InitializeGraphics()
+{
+    // initializing shaders
+    SetVHFShader();
+    SetLineShader();
 
     float colormap_data[5][256][3];
     FILE *f = fopen("bin/colormap.bin", "rb");
@@ -136,6 +170,17 @@ void main() {
             glEnableVertexAttribArray(2);
             glBindVertexArray(0);
         }
+        else
+        {
+            glGenVertexArrays(1, &plot_type.vao);
+            glBindVertexArray(plot_type.vao);
+            glBindBuffer(GL_ARRAY_BUFFER, graphics.hist_vbo);
+            glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
+            glEnableVertexAttribArray(0);
+            glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)(sizeof(float)));
+            glEnableVertexAttribArray(1);
+            glBindVertexArray(0);
+        }
         glGenTextures(1, &plot_type.texture);
         glBindTexture(GL_TEXTURE_2D, plot_type.texture);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, plot_type.width, plot_type.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
@@ -156,13 +201,13 @@ void main() {
     graphics.initialized = true;
 }
 
-void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
+void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &data_res, duckdb::unique_ptr<duckdb::MaterializedQueryResult> &hist_res)
 {
     // initializing opengl stuff
     if (!graphics.initialized)
         InitializeGraphics();
 
-    graphics.sources = res->RowCount();
+    graphics.sources = data_res->RowCount();
 
     if (graphics.sources > 1) // to prevent axis collapse from min and max being equal
     {
@@ -172,14 +217,14 @@ void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &r
         float *vhf_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 
         // axis updates
-        time_alt.x_min = res->GetValue<float>(5, 0);
-        time_alt.x_max = res->GetValue<float>(6, 0);
-        time_alt.y_min = lon_alt.y_min = alt_hist.y_min = alt_lat.x_min = res->GetValue<float>(11, 0);
-        time_alt.y_max = lon_alt.y_max = alt_hist.y_max = alt_lat.x_max = res->GetValue<float>(12, 0);
-        lon_alt.x_min = lon_lat.x_min = res->GetValue<float>(7, 0);
-        lon_alt.x_max = lon_lat.x_max = res->GetValue<float>(8, 0);
-        alt_lat.y_min = lon_lat.y_min = res->GetValue<float>(9, 0);
-        alt_lat.y_max = lon_lat.y_max = res->GetValue<float>(10, 0);
+        time_alt.x_min = data_res->GetValue<float>(5, 0);
+        time_alt.x_max = data_res->GetValue<float>(6, 0);
+        time_alt.y_min = lon_alt.y_min = alt_hist.y_min = alt_lat.x_min = data_res->GetValue<float>(11, 0);
+        time_alt.y_max = lon_alt.y_max = alt_hist.y_max = alt_lat.x_max = data_res->GetValue<float>(12, 0);
+        lon_alt.x_min = lon_lat.x_min = data_res->GetValue<float>(7, 0);
+        lon_alt.x_max = lon_lat.x_max = data_res->GetValue<float>(8, 0);
+        alt_lat.y_min = lon_lat.y_min = data_res->GetValue<float>(9, 0);
+        alt_lat.y_max = lon_lat.y_max = data_res->GetValue<float>(10, 0);
         for (int i = 0; i < 5; i++)
         {
             float t = 0.1f + i * 0.2f;
@@ -206,7 +251,7 @@ void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &r
 
         // extracting info from sql query output
         size_t chunk_i = 0; // global index
-        while (auto chunk = res->Fetch())
+        while (auto chunk = data_res->Fetch())
         {
             auto &time_vec = chunk->data[0];
             auto &lon_vec = chunk->data[1];
@@ -234,33 +279,23 @@ void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &r
         glUnmapBuffer(GL_ARRAY_BUFFER);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-        // rendering the points
-        Render();
-    }
-    else
-        status = "Not enough data to plot with current selection";
-}
-
-void State::Histogram(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
-{
-    if (graphics.sources > 1)
-    {
+        // histogram stuff
         // hist vbo
         glBindBuffer(GL_ARRAY_BUFFER, graphics.hist_vbo);
         glBufferData(GL_ARRAY_BUFFER, 200 * 2 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
         float *hist_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
 
         // axis updates
-        alt_hist.x_min = res->GetValue<float>(2, 0);
-        alt_hist.x_max = res->GetValue<float>(3, 0);
+        alt_hist.x_min = hist_res->GetValue<float>(2, 0);
+        alt_hist.x_max = hist_res->GetValue<float>(3, 0);
         for (int i = 0; i < 3; i++)
         {
             float t = 0.2f + i * 0.3f;
             alt_hist.x_major_ticks[i] = std::format("{:.1f}", alt_hist.x_min + t * (alt_hist.x_max - alt_hist.x_min));
         }
 
-        size_t chunk_i = 0; // global index
-        while (auto chunk = res->Fetch())
+        chunk_i = 0; // global index
+        while (auto chunk = hist_res->Fetch())
         {
             auto &y_vec = chunk->data[0];
             auto &x_vec = chunk->data[1];
@@ -276,24 +311,12 @@ void State::Histogram(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
         }
         glUnmapBuffer(GL_ARRAY_BUFFER);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
-    }
 
-    glBindFramebuffer(GL_FRAMEBUFFER, alt_hist.fbo);
-    glViewport(0, 0, alt_hist.width, alt_hist.height);
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    glBindVertexArray(graphics.hist_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, graphics.hist_vbo);
-    glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)(sizeof(float)));
-    glEnableVertexAttribArray(1);
-    glUseProgram(graphics.line_shader);
-    glm::mat4 proj = glm::ortho(alt_hist.x_min, alt_hist.x_max, alt_hist.y_max, alt_hist.y_min, -1.0f, 1.0f);
-    glUniformMatrix4fv(glGetUniformLocation(graphics.line_shader, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
-    glDrawArrays(GL_LINE_STRIP, 0, 200);
-    glBindVertexArray(0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        // rendering the points
+        Render();
+    }
+    else
+        status = "Not enough data to plot with current selection";
 }
 
 void State::ProcessColor(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
@@ -336,7 +359,7 @@ void State::Render()
         {
             glBindFramebuffer(GL_FRAMEBUFFER, plot_type.fbo);
             glViewport(0, 0, plot_type.width, plot_type.height);
-            glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+            glClearColor(theme.same_color_f, theme.same_color_f, theme.same_color_f, 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
             if (render_maps) // lon lat plot special: map, features, stations
             {
@@ -365,6 +388,19 @@ void State::Render()
         render(lon_alt);
         render(lon_lat, true);
         render(alt_lat);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, alt_hist.fbo);
+        glViewport(0, 0, alt_hist.width, alt_hist.height);
+        glClearColor(theme.same_color_f, theme.same_color_f, theme.same_color_f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glBindVertexArray(graphics.hist_vao);
+        glUseProgram(graphics.line_shader);
+        glm::mat4 proj = glm::ortho(alt_hist.x_min, alt_hist.x_max, alt_hist.y_max, alt_hist.y_min, -1.0f, 1.0f);
+        glUniformMatrix4fv(glGetUniformLocation(graphics.line_shader, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
+        glDrawArrays(GL_LINE_STRIP, 0, 200);
+        glBindVertexArray(0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
         status = "Plotted " + std::to_string(graphics.sources) + " sources in " + std::to_string(timer.End()) + "ms";
     }
 }
@@ -376,7 +412,21 @@ void State::Frame()
         float elapsed = (float)anime.Elapsed() / anime.duration_ms;
         if (elapsed <= 1)
         {
-            anime.sources = (size_t)(std::min(elapsed, 1.0f) * graphics.sources);
+            if (anime.by_index == 0)
+                anime.sources = (size_t)(std::min(elapsed, 1.0f) * graphics.sources);
+            
+            else
+            {
+                float threshold = time_alt.x_min + elapsed * (time_alt.x_max - time_alt.x_min);
+                glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
+                float *ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
+                size_t i = 0;
+                while (i < graphics.sources && ptr[i * 5 + 0] <= threshold)
+                    i++;
+                glUnmapBuffer(GL_ARRAY_BUFFER);
+                glBindBuffer(GL_ARRAY_BUFFER, 0);
+                anime.sources = i;
+            }
             Render();
         }
         else

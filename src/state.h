@@ -73,8 +73,10 @@ struct State
     struct Anime
     {
         int duration = 5, duration_ms; // duration_ms for convenience
-        size_t sources;                // how many sources to display this frame
-        clock_t start;                 // when animation started
+        int by_index = 0;
+        std::array<const char *, 2> options = {"Point", "Time"};
+        size_t sources; // how many sources to display this frame
+        clock_t start;  // when animation started
         bool animating = false;
 
         void Start()
@@ -95,23 +97,34 @@ struct State
             animating = false;
         }
     };
+    struct Theme
+    {
+        int vhf_size = 1;
+        int dark = 1;              // 1: dark, 0: light
+        int color_32 = 255;        // int color (white if black, black if white)
+        float same_color_f = 0.0f; // float same color (black if black, white if white)
+        float diff_color_f = 1.0f; // float flipped color (white if black, black if white)
+    };
 
     std::string status = "Let's do this! :)";
-    int animation_timer = 5;
     Timer timer;
     Anime anime;
     Filter filter;
     Graphics graphics;
     Plot time_alt, lon_alt, alt_hist, lon_lat, alt_lat;
+    Theme theme;
 
     // functions
-    void Clear();                                                                 // TODO: not fully implemented yet
-    void ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res); // populates vbo and sets up the axes
-    void ProcessColor(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res);  // edits vbo with new color bys
-    void Render();                                                                // renders the points in OpenGL
-    void Frame();                                                                 // render a frame of animation
-    void Histogram(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res);     // histogram needs seperate query so it gets seperate function
-    void InitializeGraphics();                                                    // initailzies the opengl shaders, colormaps, textures, etc.
+    void Clear(); // TODO: not fully implemented yet
+    void ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &data_res,
+                       duckdb::unique_ptr<duckdb::MaterializedQueryResult> &hist_res); // populates vbo and sets up the axes
+    void ProcessColor(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res);       // edits vbo with new color bys
+    void Render();                                                                     // renders the points in OpenGL
+    void Frame();                                                                      // render a frame of animation
+    void Flip();                                                                       // flippping the theme (please use dark mode)
+    void InitializeGraphics();                                                         // initailzies the components needed for opengl
+    void SetVHFShader();                                                               // helper for updating VHF shader
+    void SetLineShader();                                                              // helper for updating line shader (used for maps and histogram)
 };
 
 #endif

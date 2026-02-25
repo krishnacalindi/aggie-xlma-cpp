@@ -1,6 +1,6 @@
 # Aggie XLMA (C++)
 
-A desktop application written in C++ that helps you view, analyze, and interact with LMA ([Lightning Mapping Array](https://lightning.tamu.edu/hlma/)) data. This project is a long-term effort to modernize the existing XLMA application. Our mission is to provide a reliable, and fast tool for analysis of lightning data. Plase check the releases tab for the latest version!
+A desktop application written in C++ that helps you view, analyze, and interact with LMA ([Lightning Mapping Array](https://lightning.tamu.edu/hlma/)) data. This project is a long-term effort to modernize the existing XLMA application. Our mission is to provide a reliable and fast tool for analysis of lightning data. Plase check the releases tab for the latest version!
 
 ## Screenshot:
 ![GUI](./extra/screenshot.png)

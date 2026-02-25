@@ -13,20 +13,11 @@
 #include <state.h>
 #include <ctime>
 
-/*
-TODO:
-Interactivity with pan, zoom and selection
-ENTLN
-maps
-features
-sizes for dots and entln
-*/
-
 duckdb::DuckDB db(nullptr); // in memory databse
 duckdb::Connection con(db); // connection to database
 static State state;         // state of application
 // rotation logic obtained from https://github.com/ocornut/imgui/issues/705
-inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, ImU32 text_color)
+inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, ImU32 color_32)
 {
     pos.x = IM_ROUND(pos.x);
     pos.y = IM_ROUND(pos.y);
@@ -49,7 +40,7 @@ inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, 
             ImVec2(glyph->U1, glyph->V0),
             ImVec2(glyph->U1, glyph->V1),
             ImVec2(glyph->U0, glyph->V1),
-            text_color);
+            color_32);
         pos.y -= glyph->AdvanceX * scale;
     }
 }
@@ -121,8 +112,7 @@ void Filter()
                     "CROSS JOIN density d "
                     "CROSS JOIN bounds b "
                     "ORDER BY t.time";
-    auto result = con.Query(data_query);
-    state.ProcessResult(result);
+    auto data_result = con.Query(data_query);
 
     // histogram (done seperately as size of output differs)
     std::string hist_query = "SELECT "
@@ -133,8 +123,8 @@ void Filter()
                              "FROM lma "
                              "WHERE plot = true AND alt >= 0 AND alt <= 20 GROUP BY bin "
                              "ORDER BY bin";
-    result = con.Query(hist_query);
-    state.Histogram(result);
+    auto hist_result = con.Query(hist_query);
+    state.ProcessResult(data_result, hist_result);
 }
 
 void RenderUI()
@@ -287,7 +277,7 @@ void RenderUI()
 
         if (ImGui::BeginMenu("View"))
         {
-            if (ImGui::MenuItem("Animate"))
+            if (ImGui::MenuItem("Animate", "Ctrl+d"))
             {
                 state.timer.Start();
                 state.anime.Start();
@@ -392,6 +382,8 @@ void RenderUI()
     float left_width = ImGui::GetContentRegionAvail().x * 0.3f;
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
     ImGui::BeginChild("##Tools", ImVec2(left_width, 0), ImGuiChildFlags_Borders);
+
+    // filters
     ImGui::Text("Filters");
     if (ImGui::InputFloat("Min. Stations", &state.filter.min_stations))
     {
@@ -426,12 +418,16 @@ void RenderUI()
     {
         Filter();
     }
+
+    // layers:  maps, features, etc
     ImGui::Text("Layers");
     if (ImGui::Combo("Maps", &state.graphics.map.index, state.graphics.map.options.data(), state.graphics.map.options.size()))
     {
         state.timer.Start();
         state.Render();
     }
+
+    // colors
     ImGui::Text("Colors");
 
     if (ImGui::Combo("Colormaps", &state.graphics.colormap.index, state.graphics.colormap.options.data(), state.graphics.colormap.options.size()))
@@ -474,8 +470,32 @@ void RenderUI()
         auto result = con.Query(color_query);
         state.ProcessColor(result);
     }
+
+    // animation
     ImGui::Text("Animation");
     ImGui::InputInt("Duration", &state.anime.duration);
+    ImGui::Combo("Animate by", &state.anime.by_index, state.anime.options.data(), state.anime.options.size());
+
+    // other
+    ImGui::Text("Other");
+    if (ImGui::InputInt("VHF Size", &state.theme.vhf_size, 1, 2))
+    {
+        state.timer.Start();
+        state.theme.vhf_size = std::clamp(state.theme.vhf_size, 1, 10);
+        state.SetVHFShader();
+    }
+    if (ImGui::RadioButton("Light", &state.theme.dark, 0))
+    {
+        state.Flip();
+    }
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Dark", &state.theme.dark, 1))
+    {
+        state.Flip();
+    }
+    ImGui::SameLine();
+    ImGui::Text(" Theme");
+
     ImGui::EndChild();
 
     ImGui::SameLine();
@@ -502,10 +522,10 @@ void RenderUI()
             {
                 float y = p.y + tick_positions[i] * state.time_alt.height;
                 float x = p.x + axis_size;
-                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.time_alt.y_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255));
             }
         }
         ImGui::EndChild();
@@ -522,10 +542,10 @@ void RenderUI()
             for (int i = 0; i < 5; i++)
             {
                 float x = p.x + tick_positions[i] * state.time_alt.width;
-                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.time_alt.x_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), label);
             }
         }
         ImGui::EndChild();
@@ -547,10 +567,10 @@ void RenderUI()
             {
                 float y = p.y + tick_positions[i] * state.lon_alt.height;
                 float x = p.x + axis_size;
-                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.lon_alt.y_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255));
             }
         }
         ImGui::EndChild();
@@ -567,10 +587,10 @@ void RenderUI()
             for (int i = 0; i < 5; i++)
             {
                 float x = p.x + tick_positions[i] * state.lon_alt.width;
-                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.lon_alt.x_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), label);
             }
         }
         ImGui::EndChild();
@@ -593,10 +613,10 @@ void RenderUI()
             {
                 float y = p.y + tick_positions[i] * state.alt_hist.height;
                 float x = p.x + axis_size;
-                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.alt_hist.y_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255));
             }
         }
         ImGui::EndChild();
@@ -613,10 +633,10 @@ void RenderUI()
             for (int i = 0; i < 3; i++)
             {
                 float x = p.x + tick_positions[i] * state.alt_hist.width;
-                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.alt_hist.x_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), label);
             }
         }
         ImGui::EndChild();
@@ -638,10 +658,10 @@ void RenderUI()
             {
                 float y = p.y + tick_positions[i] * state.lon_lat.height;
                 float x = p.x + axis_size;
-                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.lon_lat.y_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255));
             }
         }
         ImGui::EndChild();
@@ -658,10 +678,10 @@ void RenderUI()
             for (int i = 0; i < 5; i++)
             {
                 float x = p.x + tick_positions[i] * state.lon_lat.width;
-                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.lon_lat.x_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), label);
             }
         }
         ImGui::EndChild();
@@ -684,10 +704,10 @@ void RenderUI()
             {
                 float y = p.y + tick_positions[i] * state.alt_lat.height;
                 float x = p.x + axis_size;
-                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.alt_lat.y_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(255, 255, 255, 255));
+                AddVerticalText(draw_list, label, ImVec2(x - tick_height - text_size.y, y + text_size.x * 0.5f), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255));
             }
         }
         ImGui::EndChild();
@@ -704,10 +724,10 @@ void RenderUI()
             for (int i = 0; i < 3; i++)
             {
                 float x = p.x + tick_positions[i] * state.alt_lat.width;
-                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(255, 255, 255, 255), 1.0f);
+                draw_list->AddLine(ImVec2(x, p.y), ImVec2(x, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), 1.0f);
                 const char *label = state.alt_lat.x_major_ticks[i].c_str();
                 ImVec2 text_size = ImGui::CalcTextSize(label);
-                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(255, 255, 255, 255), label);
+                draw_list->AddText(ImVec2(x - text_size.x * 0.5f, p.y + tick_height), IM_COL32(state.theme.color_32, state.theme.color_32, state.theme.color_32, 255), label);
             }
         }
         ImGui::EndChild();
@@ -715,6 +735,14 @@ void RenderUI()
     ImGui::EndChild();
     ImGui::EndChild();
     ImGui::PopStyleVar(2);
+
+    // shorcut handling
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_D))
+    {
+        state.timer.Start();
+        state.anime.Start();
+    }
+    
     ImGui::End();
 }
 
@@ -764,7 +792,6 @@ int main()
     ImGuiIO &io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.FontGlobalScale = 1.8f;
-    ImGui::StyleColorsDark();
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
@@ -776,6 +803,12 @@ int main()
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
+
+        if (state.theme.dark == 1)
+            ImGui::StyleColorsDark();
+        else
+            ImGui::StyleColorsLight();
+
         if (state.anime.animating) // animation handler has to work per frame of UI renderer
             state.Frame();
         RenderUI();

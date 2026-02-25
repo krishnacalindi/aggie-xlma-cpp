@@ -1,4 +1,5 @@
 build/
 external/
 resources/
-bin/
+.PVS-Studio
+.vscode
