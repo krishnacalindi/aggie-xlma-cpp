@@ -5,11 +5,14 @@
 #include <vector>
 #include <duckdb.hpp>
 #include <GL/glew.h>
+#include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <fstream>
 #include <sstream>
+
+extern GLFWwindow *window;
 
 struct State
 {
@@ -34,6 +37,7 @@ struct State
         ColorMap colormap;
         Map map;
         size_t sources = 0;
+        int plot_x, plot_y, plot_width, plot_height;
     };
     struct Plot
     {
@@ -77,7 +81,9 @@ struct State
         std::array<const char *, 2> options = {"Point", "Time"};
         size_t sources; // how many sources to display this frame
         clock_t start;  // when animation started
-        bool animating = false;
+        bool animating = false, saving = false;
+        void *gif = nullptr;
+        std::string gif_path;
 
         void Start()
         {
@@ -115,13 +121,15 @@ struct State
     Theme theme;
 
     // functions
-    void Clear(); // TODO: not fully implemented yet
+    void ClearPlot();
     void ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &data_res,
                        duckdb::unique_ptr<duckdb::MaterializedQueryResult> &hist_res); // populates vbo and sets up the axes
     void ProcessColor(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res);       // edits vbo with new color bys
     void Render();                                                                     // renders the points in OpenGL
     void Frame();                                                                      // render a frame of animation
     void Flip();                                                                       // flippping the theme (please use dark mode)
+    void StartSaveGIF(const std::string &path);                                        // does gif writer initializing for saving
+    void SaveGIFFrame();                                                               // saves current plot frame
     void InitializeGraphics();                                                         // initailzies the components needed for opengl
     void SetVHFShader();                                                               // helper for updating VHF shader
     void SetLineShader();                                                              // helper for updating line shader (used for maps and histogram)

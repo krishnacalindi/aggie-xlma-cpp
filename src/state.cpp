@@ -1,5 +1,6 @@
 #include "state.h"
 #include <format>
+#include <gif.h>
 
 void State::SetVHFShader()
 {
@@ -405,6 +406,14 @@ void State::Render()
     }
 }
 
+void State::StartSaveGIF(const std::string &path)
+{
+    anime.gif_path = path;
+    anime.gif = new GifWriter();
+    GifBegin((GifWriter *)anime.gif, path.c_str(), graphics.plot_width, graphics.plot_height, 10);
+    anime.saving = true;
+}
+
 void State::Frame()
 {
     if (anime.animating && graphics.sources > 1)
@@ -414,7 +423,7 @@ void State::Frame()
         {
             if (anime.by_index == 0)
                 anime.sources = (size_t)(std::min(elapsed, 1.0f) * graphics.sources);
-            
+
             else
             {
                 float threshold = time_alt.x_min + elapsed * (time_alt.x_max - time_alt.x_min);
@@ -432,13 +441,52 @@ void State::Frame()
         else
         {
             anime.End();
-            Render(); // final render to ensure everything is plotted
+            Render();
         }
     }
 }
 
-void State::Clear()
+void State::SaveGIFFrame()
 {
-    // clearing all data in state.
-    return;
+    int fb_w, fb_h;
+    glfwGetFramebufferSize(window, &fb_w, &fb_h);
+    std::vector<uint8_t> pixels(graphics.plot_width * graphics.plot_height * 4);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glReadBuffer(GL_BACK);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(graphics.plot_x, fb_h - (graphics.plot_y + graphics.plot_height), graphics.plot_width, graphics.plot_height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    for (int y = 0; y < graphics.plot_height / 2; ++y)
+    {
+        int top = y * graphics.plot_width * 4;
+        int bottom = (graphics.plot_height - 1 - y) * graphics.plot_width * 4;
+        for (int x = 0; x < graphics.plot_width * 4; ++x)
+            std::swap(pixels[top + x], pixels[bottom + x]);
+    }
+    GifWriteFrame((GifWriter *)anime.gif, pixels.data(), graphics.plot_width, graphics.plot_height, 10);
+    if (!anime.animating)
+    {
+        status = "Saved animation to " + anime.gif_path;
+        anime.saving = false;
+        GifEnd((GifWriter *)anime.gif);
+        delete (GifWriter *)anime.gif;
+        anime.gif = nullptr;
+    }
+}
+
+void State::ClearPlot()
+{
+    auto clear = [&](Plot &plot_type)
+    {
+        glBindFramebuffer(GL_FRAMEBUFFER, plot_type.fbo);
+        glViewport(0, 0, plot_type.width, plot_type.height);
+        glClearColor(theme.same_color_f, theme.same_color_f, theme.same_color_f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    };
+
+    clear(time_alt);
+    clear(lon_alt);
+    clear(lon_lat);
+    clear(alt_hist);
+    clear(alt_lat);
 }

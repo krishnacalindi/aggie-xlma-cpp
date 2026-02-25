@@ -1,5 +1,6 @@
 build/
 external/
 resources/
+test/
 .PVS-Studio
 .vscode

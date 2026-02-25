@@ -1,21 +1,23 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#define GIF_FLIP_VERT
+
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_opengl3.h>
 #include "imgui_internal.h"
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
 #include <iostream>
 #include <portable-file-dialogs.h>
 #include <filesystem>
-#include <duckdb.hpp>
 #include <regex>
 #include <state.h>
+#include "stb_image_write.h"
 #include <ctime>
 
 duckdb::DuckDB db(nullptr); // in memory databse
 duckdb::Connection con(db); // connection to database
 static State state;         // state of application
+GLFWwindow *window = nullptr;
 // rotation logic obtained from https://github.com/ocornut/imgui/issues/705
 inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, ImU32 color_32)
 {
@@ -244,27 +246,71 @@ void RenderUI()
         {
             if (ImGui::MenuItem("Animation"))
             {
+                auto save = pfd::save_file("Save animaton", "plots.gif", {"GIF", "*.gif"}).result();
+                if (!save.empty())
+                {
+                    if (!save.ends_with(".gif"))
+                        save += "gif";
+                    state.ClearPlot();
+                    state.StartSaveGIF(save);
+                    state.timer.Start();
+                    state.anime.Start();
+                }
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Export animation as a .GIF video.");
 
             if (ImGui::MenuItem("Image"))
             {
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Save current view as a .PNG image.");
+                int fb_w, fb_h;
+                glfwGetFramebufferSize(window, &fb_w, &fb_h);
+                std::vector<unsigned char> pixels(state.graphics.plot_width * state.graphics.plot_height * 3);
+                glBindFramebuffer(GL_FRAMEBUFFER, 0);
+                glReadBuffer(GL_BACK);
+                glPixelStorei(GL_PACK_ALIGNMENT, 1);
+                glReadPixels(state.graphics.plot_x, fb_h - (state.graphics.plot_y + state.graphics.plot_height), state.graphics.plot_width, state.graphics.plot_height, GL_RGB, GL_UNSIGNED_BYTE, pixels.data());
+                for (int y = 0; y < state.graphics.plot_height / 2; ++y)
+                {
+                    int top = y * state.graphics.plot_width * 3;
+                    int bottom = (state.graphics.plot_height - 1 - y) * state.graphics.plot_width * 3;
+                    for (int x = 0; x < state.graphics.plot_width * 3; ++x)
+                        std::swap(pixels[top + x], pixels[bottom + x]);
+                }
+                auto save = pfd::save_file("Save image", "plots.png", {"PNG", "*.png", "JPEG", "*.jpg"}).result();
+                if (!save.empty())
+                {
+                    if (!save.ends_with(".png") && !save.ends_with(".jpg"))
+                        save += ".png";
 
-            if (ImGui::MenuItem("DAT"))
-            {
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Export data as .dat file compatible with lmatools.");
+                    if (save.ends_with(".png"))
+                        stbi_write_png(save.c_str(), state.graphics.plot_width, state.graphics.plot_height, 3, pixels.data(), state.graphics.plot_width * 3);
+                    else
+                        stbi_write_jpg(save.c_str(), state.graphics.plot_width, state.graphics.plot_height, 3, pixels.data(), 100);
 
-            if (ImGui::MenuItem("Parquet"))
-            {
+                    state.status = "Saved image to " + save;
+                }
             }
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Export data as parquet file with Apache arrow.");
+                ImGui::SetTooltip("Save current view as a .PNG or .JPEG image.");
+
+            if (ImGui::MenuItem("Data"))
+            {
+                auto save = pfd::save_file("Save parquet", "data.parquet", {"PARQUET", "*.parquet", "CSV", ".csv"}).result();
+                if (!save.empty())
+                {
+                    if (!save.ends_with(".parquet") && !save.ends_with(".csv"))
+                        save += ".parquet";
+
+                    auto result = save.ends_with(".parquet")
+                                      ? con.Query("COPY (SELECT * FROM lma WHERE plot = true) TO '" + save + "' (FORMAT PARQUET)")
+                                      : con.Query("COPY (SELECT * FROM lma WHERE plot = true) TO '" + save + "' (FORMAT CSV)");
+
+                    if (!result->HasError())
+                        state.status = "Saved data to " + save;
+                }
+            }
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("Export data as .PARQUET or .CSV.");
 
             if (ImGui::MenuItem("State"))
             {
@@ -295,7 +341,7 @@ void RenderUI()
             {
                 con.Query("DROP TABLE IF EXISTS lma");
                 con.Query("DROP TABLE IF EXISTS ctg");
-                state.Clear();
+                state.ClearPlot();
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Clear all current data and plots.");
@@ -502,6 +548,13 @@ void RenderUI()
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::BeginChild("##Plots", ImVec2(0, 0), ImGuiChildFlags_Borders);
+    ImVec2 plot_pos = ImGui::GetWindowPos();
+    ImVec2 plot_size = ImGui::GetWindowSize();
+    state.graphics.plot_x = plot_pos.x;
+    state.graphics.plot_y = plot_pos.y;
+    state.graphics.plot_height = plot_size.y;
+    state.graphics.plot_width = plot_size.x;
+
     float fixed_plot_height = ImGui::GetContentRegionAvail().y * 0.18f;
     float fixed_plot_width = ImGui::GetContentRegionAvail().x * 0.8f;
     float axis_size = ImGui::GetFontSize() * 1.8f;
@@ -742,7 +795,7 @@ void RenderUI()
         state.timer.Start();
         state.anime.Start();
     }
-    
+
     ImGui::End();
 }
 
@@ -768,7 +821,7 @@ int main()
 
     GLFWmonitor *primary = glfwGetPrimaryMonitor();
     const GLFWvidmode *mode = glfwGetVideoMode(primary);
-    GLFWwindow *window = glfwCreateWindow(mode->width, mode->height, "Aggie XLMA", nullptr, nullptr);
+    window = glfwCreateWindow(mode->width, mode->height, "Aggie XLMA", nullptr, nullptr);
 
     if (!window)
     {
@@ -822,6 +875,9 @@ int main()
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
         glfwSwapBuffers(window);
+
+        if (state.anime.saving)
+            state.SaveGIFFrame();
     }
 
     ImGui_ImplOpenGL3_Shutdown();

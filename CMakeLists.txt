@@ -10,6 +10,7 @@ find_package(glm CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(DuckDB CONFIG REQUIRED)
 find_path(PORTABLE_FILE_DIALOGS_INCLUDE_DIRS "portable-file-dialogs.h")
+find_package(Stb REQUIRED)
 
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
@@ -26,6 +27,7 @@ endif()
 
 target_include_directories(AggieXLMA PRIVATE 
     ${PORTABLE_FILE_DIALOGS_INCLUDE_DIRS}
+    ${Stb_INCLUDE_DIR}
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
