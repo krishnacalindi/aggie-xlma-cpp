@@ -331,8 +331,15 @@ void RenderUI()
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Start animation playback.");
 
-            if (ImGui::MenuItem("Reset"))
+            if (ImGui::MenuItem("Reset", "F5"))
             {
+                for (int i = 0; i < 5; i++)
+                {
+                    State::Plot *p = state.plots[i];
+                    p->uv_x = 0.0f;
+                    p->uv_y = 0.0f;
+                    p->zoom = 1.0f;
+                }
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Reset view to default.");
@@ -561,6 +568,9 @@ void RenderUI()
     float tick_height = ImGui::GetFontSize() * 0.4f;
     ImGui::BeginChild("##TimeAltitude", ImVec2(-1, fixed_plot_height), ImGuiChildFlags_Borders);
     {
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        state.time_alt.x = pos.x;
+        state.time_alt.y = pos.y;
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
@@ -583,7 +593,8 @@ void RenderUI()
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.time_alt.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::Image((ImTextureID)state.time_alt.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(state.time_alt.uv_x, state.time_alt.uv_y),
+                     ImVec2(state.time_alt.uv_x + state.time_alt.zoom, state.time_alt.uv_y + state.time_alt.zoom));
         ImGui::BeginChild("##Node1", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
@@ -606,6 +617,9 @@ void RenderUI()
     ImGui::EndChild();
     ImGui::BeginChild("##LongitudeAltitude", ImVec2(fixed_plot_width, fixed_plot_height), ImGuiChildFlags_Borders);
     {
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        state.lon_alt.x = pos.x;
+        state.lon_alt.y = pos.y;
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
@@ -628,7 +642,8 @@ void RenderUI()
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.lon_alt.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::Image((ImTextureID)state.lon_alt.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(state.lon_alt.uv_x, state.lon_alt.uv_y),
+                     ImVec2(state.lon_alt.uv_x + state.lon_alt.zoom, state.lon_alt.uv_y + state.lon_alt.zoom));
         ImGui::BeginChild("##Node2", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
@@ -652,6 +667,9 @@ void RenderUI()
     ImGui::SameLine();
     ImGui::BeginChild("##AltitudeHistogram", ImVec2(-1, fixed_plot_height), ImGuiChildFlags_Borders);
     {
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        state.alt_hist.x = pos.x;
+        state.alt_hist.y = pos.y;
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
@@ -674,7 +692,8 @@ void RenderUI()
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.alt_hist.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::Image((ImTextureID)state.alt_hist.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(state.alt_hist.uv_x, state.alt_hist.uv_y),
+                     ImVec2(state.alt_hist.uv_x + state.alt_hist.zoom, state.alt_hist.uv_y + state.alt_hist.zoom));
         ImGui::BeginChild("##Node3", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
@@ -697,6 +716,9 @@ void RenderUI()
     ImGui::EndChild();
     ImGui::BeginChild("##LongitudeLatitude", ImVec2(fixed_plot_width, -1), ImGuiChildFlags_Borders);
     {
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        state.lon_lat.x = pos.x;
+        state.lon_lat.y = pos.y;
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
@@ -719,7 +741,8 @@ void RenderUI()
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.lon_lat.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::Image((ImTextureID)state.lon_lat.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(state.lon_lat.uv_x, state.lon_lat.uv_y),
+                     ImVec2(state.lon_lat.uv_x + state.lon_lat.zoom, state.lon_lat.uv_y + state.lon_lat.zoom));
         ImGui::BeginChild("##Node4", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
@@ -743,6 +766,9 @@ void RenderUI()
     ImGui::SameLine();
     ImGui::BeginChild("##AltitudeLatitude", ImVec2(-1, -1), ImGuiChildFlags_Borders);
     {
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        state.alt_lat.x = pos.x;
+        state.alt_lat.y = pos.y;
         ImVec2 window_size = ImGui::GetWindowSize();
         float width = window_size.x;
         float height = window_size.y;
@@ -765,7 +791,8 @@ void RenderUI()
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::Image((ImTextureID)state.alt_lat.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
+        ImGui::Image((ImTextureID)state.alt_lat.texture, ImVec2(width - axis_size, height - axis_size), ImVec2(state.alt_lat.uv_x, state.alt_lat.uv_y),
+                     ImVec2(state.alt_lat.uv_x + state.alt_lat.zoom, state.alt_lat.uv_y + state.alt_lat.zoom));
         ImGui::BeginChild("##Node5", ImVec2(axis_size, axis_size), false);
         ImGui::EndChild();
         ImGui::SameLine();
@@ -795,7 +822,60 @@ void RenderUI()
         state.timer.Start();
         state.anime.Start();
     }
+    if (ImGui::IsKeyPressed(ImGuiKey_F5))
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            State::Plot *p = state.plots[i];
+            p->uv_x = 0.0f;
+            p->uv_y = 0.0f;
+            p->zoom = 1.0f;
+        }
+    }
 
+    // interactivity
+    ImVec2 mouse = ImGui::GetMousePos();
+    float scroll = ImGui::GetIO().MouseWheel;
+    if (scroll != 0.0f)
+    {
+        for (int i = 0; i < 5; i++)
+        {
+            State::Plot *p = state.plots[i];
+            if (mouse.x >= p->x && mouse.y >= p->y &&
+                mouse.x <= p->x + p->width && mouse.y <= p->y + p->height)
+            {
+                float mx = (mouse.x - p->x) / p->width;
+                float my = (mouse.y - p->y) / p->height;
+                float uv_mouse_x = p->uv_x + mx * p->zoom;
+                float uv_mouse_y = p->uv_y + my * p->zoom;
+                float old_zoom = p->zoom;
+                p->zoom -= scroll * 0.05f;
+                p->zoom = std::clamp(p->zoom, 0.1f, 1.0f);
+                p->uv_x = uv_mouse_x - mx * p->zoom;
+                p->uv_y = uv_mouse_y - my * p->zoom;
+                p->uv_x = std::clamp(p->uv_x, 0.0f, 1.0f - p->zoom);
+                p->uv_y = std::clamp(p->uv_y, 0.0f, 1.0f - p->zoom);
+                break;
+            }
+        }
+    }
+    if (ImGui::GetIO().MouseDown[1])
+    {
+        ImVec2 delta = ImGui::GetIO().MouseDelta;
+        for (int i = 0; i < 5; i++)
+        {
+            State::Plot *p = state.plots[i];
+            if (mouse.x >= p->x && mouse.y >= p->y &&
+                mouse.x <= p->x + p->width && mouse.y <= p->y + p->height)
+            {
+                p->uv_x -= (delta.x / p->width) * p->zoom;
+                p->uv_y -= (delta.y / p->height) * p->zoom;
+                p->uv_x = std::clamp(p->uv_x, 0.0f, 1.0f - p->zoom);
+                p->uv_y = std::clamp(p->uv_y, 0.0f, 1.0f - p->zoom);
+                break;
+            }
+        }
+    }
     ImGui::End();
 }
 

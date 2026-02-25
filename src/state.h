@@ -44,6 +44,8 @@ struct State
         GLuint texture, fbo, vao;
         float x_min, x_max, y_min, y_max;
         int width, height;
+        int x, y;
+        float zoom = 1.0f, uv_x = 0.0f, uv_y = 0.0f;
         std::array<std::string, 5> x_major_ticks = {"", "", "", "", ""};
         // std::array<std::string, 5> x_minor_ticks = {"", "", "", "", ""};
         std::array<std::string, 5> y_major_ticks = {"", "", "", "", ""};
@@ -118,6 +120,7 @@ struct State
     Filter filter;
     Graphics graphics;
     Plot time_alt, lon_alt, alt_hist, lon_lat, alt_lat;
+    Plot* plots[5] = {&time_alt, &lon_alt, &alt_hist, &lon_lat, &alt_lat};
     Theme theme;
 
     // functions
