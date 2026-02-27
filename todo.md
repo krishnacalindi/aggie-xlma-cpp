@@ -7,7 +7,6 @@
 ## Minor
 
 ### Planned
-- Stations (dynamic reading?)
 - Flash algorithms: XLMA, McCaul
 - Input: ENTLN
 - Interactivity: left-click to start selection / right-click to end (DuckDB spatial)

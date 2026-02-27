@@ -11,6 +11,7 @@ find_package(imgui CONFIG REQUIRED)
 find_package(DuckDB CONFIG REQUIRED)
 find_path(PORTABLE_FILE_DIALOGS_INCLUDE_DIRS "portable-file-dialogs.h")
 find_package(Stb REQUIRED)
+find_package(ZLIB REQUIRED)
 
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
@@ -36,6 +37,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     glm::glm
     imgui::imgui
     $<IF:$<TARGET_EXISTS:duckdb>,duckdb,duckdb_static>
+    ZLIB::ZLIB
 )
 
 if(WIN32)

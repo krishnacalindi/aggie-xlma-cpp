@@ -13,9 +13,14 @@
 #include <sstream>
 
 extern GLFWwindow *window;
+extern duckdb::Connection con;
 
 struct State
 {
+    struct Rect
+    {
+        int x, y, w, h;
+    };
     struct Graphics
     {
         struct ColorMap
@@ -30,29 +35,55 @@ struct State
             int index = 1;
             std::array<const char *, 3> options = {"None", "State", "County"};
             std::array<int, 3> sizes{0, 266478, 1277960}; // comes from sizes of each shapefile
-            GLuint vao, vbo;
         };
-        GLuint vhf_shader, line_shader, vbo, hist_vbo, hist_vao;
-        bool initialized = false;
+        struct Shader
+        {
+            GLuint vhf, line, selection, stations;
+        };
+        struct Vbo
+        {
+            GLuint stations, hist, clound, vhf, map;
+        };
+        struct Vao
+        {
+            GLuint stations, map;
+        };
+        struct Count
+        {
+            int stations, clound;
+            unsigned long vhf;
+        };
+
+        // nested
+        Shader shader;
+        Vbo vbo;
+        Vao vao;
+        Count count;
         ColorMap colormap;
         Map map;
-        size_t sources = 0;
-        int plot_x, plot_y, plot_width, plot_height;
+        Rect rect;
+
+        // normal
+        bool initialized = false;
+        std::string filepath;
     };
     struct Plot
     {
+        // graphics
         GLuint texture, fbo, vao;
-        float x_min, x_max, y_min, y_max;
-        int width, height;
-        int x, y;
+
+        // dimensions
+        Rect rect;
         float zoom = 1.0f, uv_x = 0.0f, uv_y = 0.0f;
+
+        // axis
+        float x_min, x_max, y_min, y_max;
         std::array<std::string, 5> x_major_ticks = {"", "", "", "", ""};
-        // std::array<std::string, 5> x_minor_ticks = {"", "", "", "", ""};
         std::array<std::string, 5> y_major_ticks = {"", "", "", "", ""};
-        // std::array<std::string, 5> y_minor_ticks = {"", "", "", "", ""};
     };
     struct Filter
     {
+        // filters
         float min_stations = 6.0;
         float min_alt = 0.0;
         float max_alt = 20.0;
@@ -63,6 +94,7 @@ struct State
     };
     struct Timer
     {
+        // start
         clock_t start_time;
 
         void Start()
@@ -105,23 +137,41 @@ struct State
             animating = false;
         }
     };
-    struct Theme
+    struct Style
     {
-        int vhf_size = 1;
-        int dark = 1;              // 1: dark, 0: light
-        int color_32 = 255;        // int color (white if black, black if white)
-        float same_color_f = 0.0f; // float same color (black if black, white if white)
-        float diff_color_f = 1.0f; // float flipped color (white if black, black if white)
+        enum class Mode
+        {
+            Light,
+            Dark
+        };
+        struct Size
+        {
+            int vhf = 1, clound = 1;
+        };
+        struct Color
+        {
+            int as_int = 255; // int color (white if black, black if white)
+            float same = 0.0f, diff = 1.0f;
+            // float same color (black if black, white if white)
+            // float flipped color (white if black, black if white)
+        };
+
+        // vars
+        Size size;
+        Mode mode = Mode::Dark;
+        Color color;
     };
 
+    // variables
     std::string status = "Let's do this! :)";
     Timer timer;
     Anime anime;
     Filter filter;
     Graphics graphics;
+    Style style;
+
     Plot time_alt, lon_alt, alt_hist, lon_lat, alt_lat;
-    Plot* plots[5] = {&time_alt, &lon_alt, &alt_hist, &lon_lat, &alt_lat};
-    Theme theme;
+    Plot *plots[5] = {&time_alt, &lon_alt, &alt_hist, &lon_lat, &alt_lat};
 
     // functions
     void ClearPlot();
@@ -135,7 +185,12 @@ struct State
     void SaveGIFFrame();                                                               // saves current plot frame
     void InitializeGraphics();                                                         // initailzies the components needed for opengl
     void SetVHFShader();                                                               // helper for updating VHF shader
+    void ReadStations(const std::string &filepath);                                    // reads station info into its vbo
     void SetLineShader();                                                              // helper for updating line shader (used for maps and histogram)
+    void SetStationShader();                                                           // shader for stations
+    void Filter();                                                                     // filters db using sql query
+    std::string ColorBy();                                                             // helper for color by query
+    void Color();                                                                    // color only query
 };
 
 #endif

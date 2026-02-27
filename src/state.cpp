@@ -1,10 +1,149 @@
 #include "state.h"
 #include <format>
+#include <zlib.h>
 #include <gif.h>
+
+// helper for color by
+std::string State::ColorBy()
+{
+    switch (graphics.colormap.by_index)
+    {
+    case 0:
+        return "(time - b.min_time) / (b.max_time - b.min_time)";
+    case 1:
+        return "(t.row_idx - 1)::FLOAT / (t.total_rows - 1)::FLOAT";
+    case 2:
+        return "bin_count::FLOAT / d.max_c";
+    case 3:
+        return "LN(bin_count)::FLOAT / d.max_lc::FLOAT";
+    case 4:
+        return "(alt - b.min_alt) / (b.max_alt - b.min_alt)";
+    case 5:
+        return "(lon - b.min_lon) / (b.max_lon - b.min_lon)";
+    case 6:
+        return "(lat - b.min_lat) / (b.max_lat - b.min_lat)";
+    case 7:
+        return "(pdb - b.min_pdb) / (b.max_pdb - b.min_pdb)";
+    default:
+        return "(time - b.min_time) / (b.max_time - b.min_time)";
+    }
+}
+
+void State::Filter()
+{
+    // updating plot column
+    std::string filter_query = "UPDATE lma SET plot = (number_stations >= " + std::to_string(filter.min_stations) +
+                               " AND alt >= " + std::to_string(filter.min_alt) +
+                               " AND alt <= " + std::to_string(filter.max_alt) +
+                               " AND chi >= " + std::to_string(filter.min_chi) +
+                               " AND chi <= " + std::to_string(filter.max_chi) +
+                               " AND pdb >= " + std::to_string(filter.min_power) +
+                               " AND pdb <= " + std::to_string(filter.max_power) + ");";
+    con.Query(filter_query);
+
+    // getting data
+    std::string data_query =
+        "WITH bins AS ("
+        "SELECT FLOOR(lon / 0.01) AS bin_lon, FLOOR(lat / 0.01) AS bin_lat, COUNT(*) AS bin_count "
+        "FROM lma WHERE plot = true GROUP BY bin_lon, bin_lat"
+        "), "
+        "density AS ("
+        "SELECT MAX(bin_count) AS max_c, MAX(LN(bin_count)) AS max_lc FROM bins"
+        "), "
+        "times AS ("
+        "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time, "
+        "ROW_NUMBER() OVER (ORDER BY datetime) AS row_idx, "
+        "COUNT(*) OVER () AS total_rows "
+        "FROM lma WHERE plot = true"
+        "), "
+        "bounds AS ("
+        "SELECT MIN(time) AS min_time, MAX(time) AS max_time, "
+        "MIN(lon) AS min_lon, MAX(lon) AS max_lon, "
+        "MIN(lat) AS min_lat, MAX(lat) AS max_lat, "
+        "MIN(alt) AS min_alt, MAX(alt) AS max_alt, "
+        "MIN(pdb) AS min_pdb, MAX(pdb) AS max_pdb FROM times"
+        ") "
+        "SELECT t.time, t.lon, t.lat, t.alt, " +
+        ColorBy() + " AS color, "
+                    "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt, b.min_pdb, b.max_pdb "
+                    "FROM times t "
+                    "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
+                    "CROSS JOIN density d "
+                    "CROSS JOIN bounds b "
+                    "ORDER BY t.time";
+    auto data_result = con.Query(data_query);
+
+    // histogram (done seperately as size of output differs)
+    std::string hist_query = "SELECT "
+                             "FLOOR(alt / 0.1) * 0.1 AS bin, "
+                             "COUNT(*)::FLOAT AS count, "
+                             "MIN(COUNT(*)) OVER() AS min_count, "
+                             "MAX(COUNT(*)) OVER() AS max_count "
+                             "FROM lma "
+                             "WHERE plot = true AND alt >= 0 AND alt <= 20 GROUP BY bin "
+                             "ORDER BY bin";
+    auto hist_result = con.Query(hist_query);
+    ProcessResult(data_result, hist_result);
+}
+
+void State::Color()
+{
+    timer.Start();
+    std::string color_query =
+        "WITH bins AS ("
+        "SELECT FLOOR(lon / 0.01) AS bin_lon, FLOOR(lat / 0.01) AS bin_lat, COUNT(*) AS bin_count "
+        "FROM lma WHERE plot = true GROUP BY bin_lon, bin_lat"
+        "), "
+        "density AS ("
+        "SELECT MAX(bin_count) AS max_c, MAX(LN(bin_count)) AS max_lc FROM bins"
+        "), "
+        "times AS ("
+        "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time, "
+        "ROW_NUMBER() OVER (ORDER BY datetime) AS row_idx, "
+        "COUNT(*) OVER () AS total_rows "
+        "FROM lma WHERE plot = true"
+        "), "
+        "bounds AS ("
+        "SELECT MIN(time) AS min_time, MAX(time) AS max_time, "
+        "MIN(lon) AS min_lon, MAX(lon) AS max_lon, "
+        "MIN(lat) AS min_lat, MAX(lat) AS max_lat, "
+        "MIN(alt) AS min_alt, MAX(alt) AS max_alt, "
+        "MIN(pdb) AS min_pdb, MAX(pdb) AS max_pdb FROM times"
+        ") "
+        "SELECT " +
+        ColorBy() + " AS color "
+                          "FROM times t "
+                          "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
+                          "CROSS JOIN density d "
+                          "CROSS JOIN bounds b "
+                          "ORDER BY t.time";
+
+    auto result = con.Query(color_query);
+    ProcessColor(result);
+}
+
+auto link_shader = [](GLuint &program, const char *vert_src, const char *frag_src)
+{
+    glDeleteProgram(program);
+    auto compile = [](GLenum type, const char *src) -> GLuint
+    {
+        GLuint shader = glCreateShader(type);
+        glShaderSource(shader, 1, &src, nullptr);
+        glCompileShader(shader);
+        return shader;
+    };
+    GLuint vert = compile(GL_VERTEX_SHADER, vert_src);
+    GLuint frag = compile(GL_FRAGMENT_SHADER, frag_src);
+    program = glCreateProgram();
+    glAttachShader(program, vert);
+    glAttachShader(program, frag);
+    glLinkProgram(program);
+    glDeleteShader(vert);
+    glDeleteShader(frag);
+};
 
 void State::SetVHFShader()
 {
-
     std::string vhf_vert = std::string(R"(
 #version 330 core
 layout(location = 0) in float x_pos;
@@ -14,12 +153,11 @@ uniform mat4 projection;
 out float vValue;
 void main() {
     gl_Position = projection * vec4(x_pos, y_pos, 0.0, 1.0);
-    gl_PointSize = )") + std::to_string(theme.vhf_size) +
+    gl_PointSize = )") + std::to_string(style.size.vhf) +
                            R"(.0;
     vValue = value;
 }
 )";
-    const char *vhf_vert_ptr = vhf_vert.c_str();
 
     const char *vhf_frag = R"(
 #version 330 core
@@ -37,22 +175,33 @@ void main() {
 )";
 
     // vhf source shader
-    glDeleteProgram(graphics.vhf_shader);
-    GLuint vhf_vert_shader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(vhf_vert_shader, 1, &vhf_vert_ptr, nullptr);
-    glCompileShader(vhf_vert_shader);
-    GLuint vhf_frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(vhf_frag_shader, 1, &vhf_frag, nullptr);
-    glCompileShader(vhf_frag_shader);
-    graphics.vhf_shader = glCreateProgram();
-    glAttachShader(graphics.vhf_shader, vhf_vert_shader);
-    glAttachShader(graphics.vhf_shader, vhf_frag_shader);
-    glLinkProgram(graphics.vhf_shader);
-    glDeleteShader(vhf_vert_shader);
-    glDeleteShader(vhf_frag_shader);
-
-    // rendering
+    link_shader(graphics.shader.vhf, vhf_vert.c_str(), vhf_frag);
     Render(); // in the beginnning this is harmless as sources.graphics is 0
+}
+
+void State::SetStationShader()
+{
+    // stations shader
+    const char *sta_vert = R"(
+#version 330 core
+layout(location = 0) in float x_pos;
+layout(location = 1) in float y_pos;
+uniform mat4 projection;
+void main() {
+    gl_Position = projection * vec4(x_pos, y_pos, 0.0, 1.0);
+    gl_PointSize = 5.0;
+}
+)";
+
+    const char *sta_frag = R"(
+#version 330 core
+out vec4 FragColor;
+void main() {
+    FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+}
+)";
+
+    link_shader(graphics.shader.stations, sta_vert, sta_frag);
 }
 
 void State::SetLineShader()
@@ -72,37 +221,19 @@ void main() {
     out vec4 FragColor;
     void main() {
         FragColor = vec4()") +
-                            std::to_string(theme.diff_color_f) + R"();
+                            std::to_string(style.color.diff) + R"();
     }
 )";
-    const char *line_frag_ptr = line_frag.c_str();
 
-    // line shader
-    glDeleteProgram(graphics.line_shader);
-    GLuint line_vert_shader = glCreateShader(GL_VERTEX_SHADER);
-    glShaderSource(line_vert_shader, 1, &line_vert, nullptr);
-    glCompileShader(line_vert_shader);
-    GLuint line_frag_shader = glCreateShader(GL_FRAGMENT_SHADER);
-    glShaderSource(line_frag_shader, 1, &line_frag_ptr, nullptr);
-    glCompileShader(line_frag_shader);
-    graphics.line_shader = glCreateProgram();
-    glAttachShader(graphics.line_shader, line_vert_shader);
-    glAttachShader(graphics.line_shader, line_frag_shader);
-    glLinkProgram(graphics.line_shader);
-    glDeleteShader(line_vert_shader);
-    glDeleteShader(line_frag_shader);
-
-    // rendering
-    Render(); // in the beginnning this is harmless as sources.graphics is 0
+    link_shader(graphics.shader.line, line_vert, line_frag.c_str());
+    Render();
 }
 
 void State::Flip()
 {
     timer.Start();
-    bool is_dark = theme.dark == 1;
-    theme.color_32 = is_dark ? 255 : 0;
-    theme.same_color_f = is_dark ? 0.0f : 1.0f;
-    theme.diff_color_f = is_dark ? 1.0f : 0.0f;
+    style.mode = style.mode == Style::Mode::Dark ? Style::Mode::Light : Style::Mode::Dark;
+    style.color = style.mode == Style::Mode::Dark ? Style::Color{255, 0.0f, 1.0f} : Style::Color{0, 1.0f, 0.0f};
     SetLineShader();
 }
 
@@ -110,8 +241,10 @@ void State::InitializeGraphics()
 {
     // initializing shaders
     SetVHFShader();
+    SetStationShader();
     SetLineShader();
 
+    // setting up colormaps
     float colormap_data[5][256][3];
     FILE *f = fopen("bin/colormap.bin", "rb");
     fread(colormap_data, sizeof(float), 5 * 256 * 3, f);
@@ -124,80 +257,60 @@ void State::InitializeGraphics()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-    // setting up map vbo and vao
-    glGenVertexArrays(1, &graphics.map.vao);
-    glGenBuffers(1, &graphics.map.vbo);
-    glBindVertexArray(graphics.map.vao);
-    glBindBuffer(GL_ARRAY_BUFFER, graphics.map.vbo);
-    size_t map_size = 2 * 1771152 * sizeof(float);
-    glBufferData(GL_ARRAY_BUFFER, map_size, nullptr, GL_STATIC_DRAW);
+    // setting up plot textures
+    for (Plot *p : plots)
+    {
+        glGenTextures(1, &p->texture);
+        glBindTexture(GL_TEXTURE_2D, p->texture);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, p->rect.w, p->rect.h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glGenFramebuffers(1, &p->fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, p->fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, p->texture, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    }
+
+    // setting up vbos
+    glGenBuffers(1, &graphics.vbo.vhf);
+    glGenBuffers(1, &graphics.vbo.hist);
+    glGenBuffers(1, &graphics.vbo.stations);
+    glGenBuffers(1, &graphics.vbo.map);
+
+    // setting up vaos
+    auto setup_vao = [](GLuint &vao, GLuint vbo, int x_off = 0, int y_off = 0, int stride = 2, bool color = false)
+    {
+        glGenVertexArrays(1, &vao);
+        glBindVertexArray(vao);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, stride * sizeof(float), (void *)(x_off * sizeof(float)));
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, stride * sizeof(float), (void *)(y_off * sizeof(float)));
+        glEnableVertexAttribArray(1);
+        if (color)
+        {
+            glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, stride * sizeof(float), (void *)(4 * sizeof(float)));
+            glEnableVertexAttribArray(2);
+        }
+        glBindVertexArray(0);
+    };
+    setup_vao(time_alt.vao, graphics.vbo.vhf, 0, 3, 5, true);
+    setup_vao(lon_alt.vao, graphics.vbo.vhf, 1, 3, 5, true);
+    setup_vao(lon_lat.vao, graphics.vbo.vhf, 1, 2, 5, true);
+    setup_vao(alt_lat.vao, graphics.vbo.vhf, 3, 2, 5, true);
+    setup_vao(alt_hist.vao, graphics.vbo.hist, 0, 1);
+    setup_vao(graphics.vao.stations, graphics.vbo.stations, 0, 1);
+
+    // setting up map data
+    setup_vao(graphics.vao.map, graphics.vbo.map, 0, 1);
+    glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo.map);
+    glBufferData(GL_ARRAY_BUFFER, 2 * 1771152 * sizeof(float), nullptr, GL_STATIC_DRAW);
     void *map_ptr = glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
     f = fopen("bin/map.bin", "rb");
     fread(map_ptr, sizeof(float), 2 * 1771152, f);
     fclose(f);
     glUnmapBuffer(GL_ARRAY_BUFFER);
-    glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)(sizeof(float)));
-    glEnableVertexAttribArray(1);
-    glBindVertexArray(0);
-
-    // histogram vbo and vao
-    glGenVertexArrays(1, &graphics.hist_vao);
-    glGenBuffers(1, &graphics.hist_vbo);
-    glBindVertexArray(graphics.hist_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, graphics.hist_vbo);
-    glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
-    glEnableVertexAttribArray(0);
-    glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)(sizeof(float)));
-    glEnableVertexAttribArray(1);
-    glBindVertexArray(0);
-
-    glGenBuffers(1, &graphics.vbo);
-    // setting up plots
-    auto setup = [this](Plot &plot_type, int x_offset, int y_offset)
-    {
-        // global vhf vbo and vao
-        if (x_offset != 0 || y_offset != 0)
-        {
-            glGenVertexArrays(1, &plot_type.vao);
-            glBindVertexArray(plot_type.vao);
-            glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
-            glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(x_offset * sizeof(float)));
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(y_offset * sizeof(float)));
-            glEnableVertexAttribArray(1);
-            glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(4 * sizeof(float)));
-            glEnableVertexAttribArray(2);
-            glBindVertexArray(0);
-        }
-        else
-        {
-            glGenVertexArrays(1, &plot_type.vao);
-            glBindVertexArray(plot_type.vao);
-            glBindBuffer(GL_ARRAY_BUFFER, graphics.hist_vbo);
-            glVertexAttribPointer(0, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)0);
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(1, 1, GL_FLOAT, GL_FALSE, 2 * sizeof(float), (void *)(sizeof(float)));
-            glEnableVertexAttribArray(1);
-            glBindVertexArray(0);
-        }
-        glGenTextures(1, &plot_type.texture);
-        glBindTexture(GL_TEXTURE_2D, plot_type.texture);
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, plot_type.width, plot_type.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-        glGenFramebuffers(1, &plot_type.fbo);
-        glBindFramebuffer(GL_FRAMEBUFFER, plot_type.fbo);
-        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, plot_type.texture, 0);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    };
-
-    setup(time_alt, 0, 3);
-    setup(lon_alt, 1, 3);
-    setup(alt_hist, 0, 0);
-    setup(lon_lat, 1, 2);
-    setup(alt_lat, 3, 2);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 
     graphics.initialized = true;
 }
@@ -208,14 +321,17 @@ void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &d
     if (!graphics.initialized)
         InitializeGraphics();
 
-    graphics.sources = data_res->RowCount();
+    graphics.count.vhf = data_res->RowCount();
 
-    if (graphics.sources > 1) // to prevent axis collapse from min and max being equal
+    if (graphics.count.vhf <= 1) // to prevent axis collapse from min and max being equal
     {
-        // ptr to vbo
-        glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
-        glBufferData(GL_ARRAY_BUFFER, graphics.sources * 5 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-        float *vhf_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+        status = "Not enough data to plot with current selection";
+        return;
+    }
+    else
+    {
+        // reading station info
+        ReadStations(graphics.filepath);
 
         // axis updates
         time_alt.x_min = data_res->GetValue<float>(5, 0);
@@ -226,6 +342,8 @@ void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &d
         lon_alt.x_max = lon_lat.x_max = data_res->GetValue<float>(8, 0);
         alt_lat.y_min = lon_lat.y_min = data_res->GetValue<float>(9, 0);
         alt_lat.y_max = lon_lat.y_max = data_res->GetValue<float>(10, 0);
+        alt_hist.x_min = hist_res->GetValue<float>(2, 0);
+        alt_hist.x_max = hist_res->GetValue<float>(3, 0);
         for (int i = 0; i < 5; i++)
         {
             float t = 0.1f + i * 0.2f;
@@ -245,12 +363,16 @@ void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &d
         {
             float t = 0.2f + i * 0.3f;
             time_alt.y_major_ticks[2 - i] = std::format("{:.1f}", time_alt.y_min + t * (time_alt.y_max - time_alt.y_min));
-            lon_alt.y_major_ticks[2 - i] = std::format("{:.1f}", lon_alt.y_min + t * (lon_alt.y_max - lon_alt.y_min));
+            alt_hist.x_major_ticks[i] = std::format("{:.1f}", alt_hist.x_min + t * (alt_hist.x_max - alt_hist.x_min));
             alt_hist.y_major_ticks[2 - i] = std::format("{:.1f}", alt_hist.y_min + t * (alt_hist.y_max - alt_hist.y_min));
+            lon_alt.y_major_ticks[2 - i] = std::format("{:.1f}", lon_alt.y_min + t * (lon_alt.y_max - lon_alt.y_min));
             alt_lat.x_major_ticks[i] = std::format("{:.1f}", alt_lat.x_min + t * (alt_lat.x_max - alt_lat.x_min));
         }
 
-        // extracting info from sql query output
+        // vhf stuff
+        glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo.vhf);
+        glBufferData(GL_ARRAY_BUFFER, graphics.count.vhf * 5 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+        float *vhf_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
         size_t chunk_i = 0; // global index
         while (auto chunk = data_res->Fetch())
         {
@@ -275,26 +397,13 @@ void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &d
             }
             chunk_i += row_count;
         }
-
-        // populating the vbo
         glUnmapBuffer(GL_ARRAY_BUFFER);
         glBindBuffer(GL_ARRAY_BUFFER, 0);
 
         // histogram stuff
-        // hist vbo
-        glBindBuffer(GL_ARRAY_BUFFER, graphics.hist_vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo.hist);
         glBufferData(GL_ARRAY_BUFFER, 200 * 2 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
         float *hist_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-
-        // axis updates
-        alt_hist.x_min = hist_res->GetValue<float>(2, 0);
-        alt_hist.x_max = hist_res->GetValue<float>(3, 0);
-        for (int i = 0; i < 3; i++)
-        {
-            float t = 0.2f + i * 0.3f;
-            alt_hist.x_major_ticks[i] = std::format("{:.1f}", alt_hist.x_min + t * (alt_hist.x_max - alt_hist.x_min));
-        }
-
         chunk_i = 0; // global index
         while (auto chunk = hist_res->Fetch())
         {
@@ -316,153 +425,193 @@ void State::ProcessResult(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &d
         // rendering the points
         Render();
     }
-    else
-        status = "Not enough data to plot with current selection";
 }
 
 void State::ProcessColor(duckdb::unique_ptr<duckdb::MaterializedQueryResult> &res)
 {
-    if (res->RowCount() == graphics.sources)
+    if (res->RowCount() != graphics.count.vhf || graphics.count.vhf <= 1)
     {
-        if (graphics.sources > 1) // to prevent axis collapse from min and max being equal
-        {
-            // using pointer to change values in memory
-            glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
-            float *vhf_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-            size_t chunk_i = 0; // global index
-            while (auto chunk = res->Fetch())
-            {
-                auto &color_vec = chunk->data[0];
-                float *color_data = duckdb::FlatVector::GetData<float>(color_vec);
-                size_t row_count = chunk->size();
-                for (size_t i = 0; i < row_count; i++)
-                {
-                    vhf_ptr[((chunk_i + i)) * 5 + 4] = color_data[i];
-                }
-                chunk_i += row_count;
-            }
-            glUnmapBuffer(GL_ARRAY_BUFFER);
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
+        status = std::string("Color by ") + graphics.colormap.by_options[graphics.colormap.by_index] + " failed";
+        return;
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo.vhf);
+    float *vhf_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+    size_t chunk_i = 0;
+    while (auto chunk = res->Fetch())
+    {
+        float *color_data = duckdb::FlatVector::GetData<float>(chunk->data[0]);
+        size_t row_count = chunk->size();
+        for (size_t i = 0; i < row_count; i++)
+            vhf_ptr[(chunk_i + i) * 5 + 4] = color_data[i];
+        chunk_i += row_count;
+    }
+    glUnmapBuffer(GL_ARRAY_BUFFER);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    Render();
+}
 
-            //  rendering the points
-            Render();
+void State::ReadStations(const std::string &filepath)
+{
+    bool is_gz = false;
+    {
+        std::ifstream probe(filepath, std::ios::binary);
+        if (probe)
+        {
+            unsigned char b[2] = {};
+            probe.read((char *)b, 2);
+            is_gz = (b[0] == 0x1F && b[1] == 0x8B);
         }
     }
+    std::vector<float> sta_coords;
+    auto parse_line = [&](const std::string &line)
+    {
+        if (line.rfind("Sta_info:", 0) != 0)
+            return;
+        std::vector<std::string> tokens;
+        std::istringstream ss(line);
+        std::string token;
+        while (ss >> token)
+            tokens.push_back(token);
+        if (tokens.size() < 6)
+            return;
+        sta_coords.push_back(std::stof(tokens[tokens.size() - 5])); // lon
+        sta_coords.push_back(std::stof(tokens[tokens.size() - 6])); // lat
+    };
+    if (is_gz)
+    {
+        gzFile f = gzopen(filepath.c_str(), "rb");
+        if (!f)
+            return;
+        char buf[512];
+        while (gzgets(f, buf, sizeof(buf)))
+            parse_line(std::string(buf));
+        gzclose(f);
+    }
     else
-        status = std::string("Color by ") + graphics.colormap.by_options[graphics.colormap.by_index] + " failed";
+    {
+        std::ifstream f(filepath);
+        if (!f)
+            return;
+        std::string line;
+        while (std::getline(f, line))
+            parse_line(line);
+    }
+    graphics.count.stations = sta_coords.size() / 2;
+    glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo.stations);
+    glBufferData(GL_ARRAY_BUFFER, sta_coords.size() * sizeof(float), sta_coords.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
 void State::Render()
 {
-    if (graphics.sources > 1)
+    if (graphics.count.vhf <= 1)
+        return;
+
+    for (Plot *p : plots)
     {
-        auto render = [&](Plot &plot_type, bool render_maps = false)
+        glBindFramebuffer(GL_FRAMEBUFFER, p->fbo);
+        glViewport(0, 0, p->rect.w, p->rect.h);
+        glClearColor(style.color.same, style.color.same, style.color.same, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glm::mat4 proj = glm::ortho(p->x_min, p->x_max, p->y_max, p->y_min, -1.0f, 1.0f);
+        if (p == &alt_hist) // histogram
         {
-            glBindFramebuffer(GL_FRAMEBUFFER, plot_type.fbo);
-            glViewport(0, 0, plot_type.width, plot_type.height);
-            glClearColor(theme.same_color_f, theme.same_color_f, theme.same_color_f, 1.0f);
-            glClear(GL_COLOR_BUFFER_BIT);
-            if (render_maps) // lon lat plot special: map, features, stations
+            glBindVertexArray(p->vao);
+            glUseProgram(graphics.shader.line);
+            glUniformMatrix4fv(glGetUniformLocation(graphics.shader.line, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
+            glDrawArrays(GL_LINE_STRIP, 0, 200);
+            glBindVertexArray(0);
+        }
+        else
+        {
+            if (p == &lon_lat) // handling maps, stations, features, etc.
             {
-                glBindVertexArray(graphics.map.vao);
-                glUseProgram(graphics.line_shader);
-                glm::mat4 proj = glm::ortho(plot_type.x_min, plot_type.x_max, plot_type.y_max, plot_type.y_min, -1.0f, 1.0f);
-                glUniformMatrix4fv(glGetUniformLocation(graphics.line_shader, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
-                glDrawArrays(GL_LINES, 0, graphics.map.sizes[graphics.map.index]);
-                glBindVertexArray(0);
+                if (graphics.map.index != 0)
+                {
+                    glBindVertexArray(graphics.vao.map);
+                    glUseProgram(graphics.shader.line);
+                    glUniformMatrix4fv(glGetUniformLocation(graphics.shader.line, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
+                    glDrawArrays(GL_LINES, 0, graphics.map.sizes[graphics.map.index]);
+                    glBindVertexArray(0);
+                }
+                if (graphics.count.stations > 0)
+                {
+                    glBindVertexArray(graphics.vao.stations);
+                    glUseProgram(graphics.shader.stations);
+                    glUniformMatrix4fv(glGetUniformLocation(graphics.shader.stations, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
+                    glEnable(GL_PROGRAM_POINT_SIZE);
+                    glDrawArrays(GL_POINTS, 0, graphics.count.stations);
+                    glBindVertexArray(0);
+                }
             }
-            glBindVertexArray(plot_type.vao);
-            glUseProgram(graphics.vhf_shader);
+            // vhf scatter plot
+            glBindVertexArray(p->vao);
+            glUseProgram(graphics.shader.vhf);
             glEnable(GL_PROGRAM_POINT_SIZE);
-            glm::mat4 proj = glm::ortho(plot_type.x_min, plot_type.x_max, plot_type.y_max, plot_type.y_min, -1.0f, 1.0f);
-            glUniformMatrix4fv(glGetUniformLocation(graphics.vhf_shader, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
+            glUniformMatrix4fv(glGetUniformLocation(graphics.shader.vhf, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
             glActiveTexture(GL_TEXTURE0);
             glBindTexture(GL_TEXTURE_2D, graphics.colormap.texture);
-            glUniform1i(glGetUniformLocation(graphics.vhf_shader, "colormaps"), 0);
-            glUniform1i(glGetUniformLocation(graphics.vhf_shader, "cmap_index"), graphics.colormap.index);
-            glDrawArrays(GL_POINTS, 0, anime.animating ? anime.sources : graphics.sources);
+            glUniform1i(glGetUniformLocation(graphics.shader.vhf, "colormaps"), 0);
+            glUniform1i(glGetUniformLocation(graphics.shader.vhf, "cmap_index"), graphics.colormap.index);
+            glDrawArrays(GL_POINTS, 0, anime.animating ? anime.sources : graphics.count.vhf);
             glBindVertexArray(0);
-            glBindFramebuffer(GL_FRAMEBUFFER, 0);
-        };
-
-        render(time_alt);
-        render(lon_alt);
-        render(lon_lat, true);
-        render(alt_lat);
-
-        glBindFramebuffer(GL_FRAMEBUFFER, alt_hist.fbo);
-        glViewport(0, 0, alt_hist.width, alt_hist.height);
-        glClearColor(theme.same_color_f, theme.same_color_f, theme.same_color_f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        glBindVertexArray(graphics.hist_vao);
-        glUseProgram(graphics.line_shader);
-        glm::mat4 proj = glm::ortho(alt_hist.x_min, alt_hist.x_max, alt_hist.y_max, alt_hist.y_min, -1.0f, 1.0f);
-        glUniformMatrix4fv(glGetUniformLocation(graphics.line_shader, "projection"), 1, GL_FALSE, glm::value_ptr(proj));
-        glDrawArrays(GL_LINE_STRIP, 0, 200);
-        glBindVertexArray(0);
+        }
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
-        status = "Plotted " + std::to_string(graphics.sources) + " sources in " + std::to_string(timer.End()) + "ms";
     }
+    status = "Plotted " + std::to_string(graphics.count.vhf) + " sources in " + std::to_string(timer.End()) + "ms";
 }
 
 void State::StartSaveGIF(const std::string &path)
 {
     anime.gif_path = path;
     anime.gif = new GifWriter();
-    GifBegin((GifWriter *)anime.gif, path.c_str(), graphics.plot_width, graphics.plot_height, 10);
+    GifBegin((GifWriter *)anime.gif, path.c_str(), graphics.rect.w, graphics.rect.h, 10);
     anime.saving = true;
 }
 
 void State::Frame()
 {
-    if (anime.animating && graphics.sources > 1)
+    if (graphics.count.vhf <= 1)
+        return;
+    float elapsed = (float)anime.Elapsed() / anime.duration_ms;
+    if (elapsed <= 1)
     {
-        float elapsed = (float)anime.Elapsed() / anime.duration_ms;
-        if (elapsed <= 1)
-        {
-            if (anime.by_index == 0)
-                anime.sources = (size_t)(std::min(elapsed, 1.0f) * graphics.sources);
-
-            else
-            {
-                float threshold = time_alt.x_min + elapsed * (time_alt.x_max - time_alt.x_min);
-                glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo);
-                float *ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
-                size_t i = 0;
-                while (i < graphics.sources && ptr[i * 5 + 0] <= threshold)
-                    i++;
-                glUnmapBuffer(GL_ARRAY_BUFFER);
-                glBindBuffer(GL_ARRAY_BUFFER, 0);
-                anime.sources = i;
-            }
-            Render();
-        }
+        if (anime.by_index == 0)
+            anime.sources = (size_t)(elapsed * graphics.count.vhf);
         else
         {
-            anime.End();
-            Render();
+            float threshold = time_alt.x_min + elapsed * (time_alt.x_max - time_alt.x_min);
+            glBindBuffer(GL_ARRAY_BUFFER, graphics.vbo.vhf);
+            float *ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
+            size_t i = 0;
+            while (i < graphics.count.vhf && ptr[i * 5] <= threshold)
+                i++;
+            glUnmapBuffer(GL_ARRAY_BUFFER);
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            anime.sources = i;
         }
+        Render();
+    }
+    else
+    {
+        anime.End();
+        Render();
     }
 }
 
 void State::SaveGIFFrame()
 {
     int fb_w, fb_h;
-    glfwGetFramebufferSize(window, &fb_w, &fb_h);
-    std::vector<uint8_t> pixels(graphics.plot_width * graphics.plot_height * 4);
+    glfwGetFramebufferSize(window, &fb_w, &fb_h); // getting entire imgui wino
+    std::vector<uint8_t> pixels(graphics.rect.w * graphics.rect.h * 4);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glReadBuffer(GL_BACK);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(graphics.plot_x, fb_h - (graphics.plot_y + graphics.plot_height), graphics.plot_width, graphics.plot_height, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
-    for (int y = 0; y < graphics.plot_height / 2; ++y)
-    {
-        int top = y * graphics.plot_width * 4;
-        int bottom = (graphics.plot_height - 1 - y) * graphics.plot_width * 4;
-        for (int x = 0; x < graphics.plot_width * 4; ++x)
-            std::swap(pixels[top + x], pixels[bottom + x]);
-    }
-    GifWriteFrame((GifWriter *)anime.gif, pixels.data(), graphics.plot_width, graphics.plot_height, 10);
+    glReadPixels(graphics.rect.x, fb_h - (graphics.rect.y + graphics.rect.h), graphics.rect.w, graphics.rect.h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+    for (int y = 0; y < graphics.rect.h / 2; ++y)
+        for (int x = 0; x < graphics.rect.w * 4; ++x)
+            std::swap(pixels[y * graphics.rect.w * 4 + x], pixels[(graphics.rect.h - 1 - y) * graphics.rect.w * 4 + x]);
+    GifWriteFrame((GifWriter *)anime.gif, pixels.data(), graphics.rect.w, graphics.rect.h, 10);
     if (!anime.animating)
     {
         status = "Saved animation to " + anime.gif_path;
@@ -475,18 +624,12 @@ void State::SaveGIFFrame()
 
 void State::ClearPlot()
 {
-    auto clear = [&](Plot &plot_type)
+    for (Plot *p : plots)
     {
-        glBindFramebuffer(GL_FRAMEBUFFER, plot_type.fbo);
-        glViewport(0, 0, plot_type.width, plot_type.height);
-        glClearColor(theme.same_color_f, theme.same_color_f, theme.same_color_f, 1.0f);
+        glBindFramebuffer(GL_FRAMEBUFFER, p->fbo);
+        glViewport(0, 0, p->rect.w, p->rect.h);
+        glClearColor(style.color.same, style.color.same, style.color.same, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    };
-
-    clear(time_alt);
-    clear(lon_alt);
-    clear(lon_lat);
-    clear(alt_hist);
-    clear(alt_lat);
+    }
 }
