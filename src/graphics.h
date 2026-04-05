@@ -71,7 +71,7 @@ struct Graphics
     void ProcessEntlnResult(QueryResult &entln_res);                  // processes duckdb entln result
     void ProcessColor(QueryResult &color_res);                        // processes duckdb result and edits vhf vbo with new color data
 
-    void Render(); // main rendering function !!
+    void Render(Plot *one = nullptr); // main rendering function !!
 
     void UpdateTickLabels();                        // updates tick label based on min, max, zoom
     void ReadStations(const std::string &filepath); // reads lma station info from a filepath and populates station vbo

@@ -293,6 +293,8 @@ void RenderUI()
                     p->uv_y = 0.0f;
                     p->zoom = 1.0f;
                 }
+                state.graphics.UpdateTickLabels();
+                state.graphics.Render();
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Reset view to default.");
@@ -498,6 +500,8 @@ void RenderUI()
     float tick_height = ImGui::GetFontSize() * 0.4f;
     static const float three_ticks[] = {0.2f, 0.5f, 0.8f};
     static const float five_ticks[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
+    ImVec2 mouse = ImGui::GetMousePos();
+    float scroll = ImGui::GetIO().MouseWheel;
     // lamba helper for cleaner appearence
     auto plot = [&](const char *id, Graphics::Plot *p, ImVec2 size, int y_ticks, int x_ticks)
     {
@@ -505,14 +509,9 @@ void RenderUI()
         const float *x_pos = x_ticks == 3 ? three_ticks : five_ticks;
         ImGui::BeginChild(id, size, ImGuiChildFlags_Borders);
         {
-            ImVec2 pos = ImGui::GetCursorScreenPos();
-            p->rect.x = pos.x;
-            p->rect.y = pos.y;
             ImVec2 window_size = ImGui::GetWindowSize();
             float width = window_size.x;
             float height = window_size.y;
-            p->rect.w = width - axis_size;
-            p->rect.h = height - axis_size;
             // y axis
             ImGui::BeginChild((std::string(id) + "_yaxis").c_str(), ImVec2(axis_size, height - axis_size), false);
             {
@@ -520,7 +519,7 @@ void RenderUI()
                 ImVec2 wp = ImGui::GetWindowPos();
                 for (int i = 0; i < y_ticks; i++)
                 {
-                    float y = wp.y + y_pos[i] * p->rect.h;
+                    float y = wp.y + (1.0f - y_pos[i]) * p->rect.h - (ImGui::GetStyle().FramePadding.y + ImGui::GetStyle().ChildBorderSize);
                     float x = wp.x + axis_size;
                     draw_list->AddLine(ImVec2(x, y), ImVec2(x - tick_height, y), IM_COL32(state.style.color.as_int, state.style.color.as_int, state.style.color.as_int, 255), 1.0f);
                     const char *label = p->y_major_ticks[i].c_str();
@@ -530,7 +529,12 @@ void RenderUI()
             }
             ImGui::EndChild();
             ImGui::SameLine();
-            ImGui::Image((ImTextureID)p->texture, ImVec2(width - axis_size, height - axis_size), ImVec2(p->uv_x, p->uv_y), ImVec2(p->uv_x + p->zoom, p->uv_y + p->zoom));
+            ImVec2 pos = ImGui::GetCursorScreenPos();
+            p->rect.x = pos.x;
+            p->rect.y = pos.y;
+            p->rect.w = width - axis_size;
+            p->rect.h = height - axis_size;
+            ImGui::Image((ImTextureID)p->texture, ImVec2(width - axis_size, height - axis_size), ImVec2(0, 0), ImVec2(1, 1));
             // x axis
             ImGui::BeginChild((std::string(id) + "_node").c_str(), ImVec2(axis_size, axis_size), false);
             ImGui::EndChild();
@@ -551,6 +555,38 @@ void RenderUI()
             ImGui::EndChild();
         }
         ImGui::EndChild();
+
+        // plot specific interactivity
+        bool hovered = mouse.x >= p->rect.x && mouse.y >= p->rect.y &&
+                       mouse.x <= p->rect.x + p->rect.w && mouse.y <= p->rect.y + p->rect.h;
+        // zoom
+        if (scroll != 0.0f && hovered)
+        {
+            float mx = (mouse.x - p->rect.x) / p->rect.w;
+            float my = (mouse.y - p->rect.y) / p->rect.h;
+            float uv_mouse_x = p->uv_x + mx * p->zoom;
+            float uv_mouse_y = p->uv_y + my * p->zoom;
+            p->zoom -= scroll * 0.05f;
+            p->zoom = std::clamp(p->zoom, 0.1f, 1.0f);
+            p->uv_x = uv_mouse_x - mx * p->zoom;
+            p->uv_y = uv_mouse_y - my * p->zoom;
+            p->uv_x = std::clamp(p->uv_x, 0.0f, 1.0f - p->zoom);
+            p->uv_y = std::clamp(p->uv_y, 0.0f, 1.0f - p->zoom);
+            state.graphics.UpdateTickLabels();
+            state.graphics.Render(p);
+        }
+        // pan
+        if (ImGui::GetIO().MouseDown[1] && hovered)
+        {
+            ImVec2 delta = ImGui::GetIO().MouseDelta; 
+            // 0.5 is sensitivity, feel free to tune it
+            p->uv_x -= (delta.x / p->rect.w) * p->zoom * 0.5f;
+            p->uv_y += (delta.y / p->rect.h) * p->zoom * 0.5f;
+            p->uv_x = std::clamp(p->uv_x, 0.0f, 1.0f - p->zoom);
+            p->uv_y = std::clamp(p->uv_y, 0.0f, 1.0f - p->zoom);
+            state.graphics.UpdateTickLabels();
+            state.graphics.Render(p);
+        }
     };
     plot("##TimeAltitude", &state.graphics.time_alt, ImVec2(-1, fixed_plot_height), 3, 5);
     plot("##LongitudeAltitude", &state.graphics.lon_alt, ImVec2(fixed_plot_width, fixed_plot_height), 3, 5);
@@ -564,11 +600,13 @@ void RenderUI()
     ImGui::PopStyleVar(2);
 
     // shorcut handling
+    // ctrl + d: animation
     if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_D))
     {
         state.timer.Start();
         state.anime.Start();
     }
+    // f5: reset / clear plots
     if (ImGui::IsKeyPressed(ImGuiKey_F5))
     {
         for (int i = 0; i < 5; i++)
@@ -578,51 +616,8 @@ void RenderUI()
             p->uv_y = 0.0f;
             p->zoom = 1.0f;
         }
-    }
-
-    // interactivity
-    ImVec2 mouse = ImGui::GetMousePos();
-    float scroll = ImGui::GetIO().MouseWheel;
-    if (scroll != 0.0f)
-    {
-        for (int i = 0; i < 5; i++)
-        {
-            Graphics::Plot *p = state.graphics.plots[i];
-            if (mouse.x >= p->rect.x && mouse.y >= p->rect.y &&
-                mouse.x <= p->rect.x + p->rect.w && mouse.y <= p->rect.y + p->rect.h)
-            {
-                float mx = (mouse.x - p->rect.x) / p->rect.w;
-                float my = (mouse.y - p->rect.y) / p->rect.h;
-                float uv_mouse_x = p->uv_x + mx * p->zoom;
-                float uv_mouse_y = p->uv_y + my * p->zoom;
-                p->zoom -= scroll * 0.05f;
-                p->zoom = std::clamp(p->zoom, 0.1f, 1.0f);
-                p->uv_x = uv_mouse_x - mx * p->zoom;
-                p->uv_y = uv_mouse_y - my * p->zoom;
-                p->uv_x = std::clamp(p->uv_x, 0.0f, 1.0f - p->zoom);
-                p->uv_y = std::clamp(p->uv_y, 0.0f, 1.0f - p->zoom);
-                break;
-            }
-        }
         state.graphics.UpdateTickLabels();
-    }
-    if (ImGui::GetIO().MouseDown[1])
-    {
-        ImVec2 delta = ImGui::GetIO().MouseDelta;
-        for (int i = 0; i < 5; i++)
-        {
-            Graphics::Plot *p = state.graphics.plots[i];
-            if (mouse.x >= p->rect.x && mouse.y >= p->rect.y &&
-                mouse.x <= p->rect.x + p->rect.w && mouse.y <= p->rect.y + p->rect.h)
-            {
-                p->uv_x -= (delta.x / p->rect.w) * p->zoom;
-                p->uv_y -= (delta.y / p->rect.h) * p->zoom;
-                p->uv_x = std::clamp(p->uv_x, 0.0f, 1.0f - p->zoom);
-                p->uv_y = std::clamp(p->uv_y, 0.0f, 1.0f - p->zoom);
-                break;
-            }
-        }
-        state.graphics.UpdateTickLabels();
+        state.graphics.Render();
     }
     ImGui::End();
 }

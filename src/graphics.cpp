@@ -92,7 +92,10 @@ void Graphics::ProcessResult(QueryResult &data_res, QueryResult &hist_res)
     count.vhf = data_res->RowCount();
 
     if (count.vhf <= 1) // to prevent axis collapse from min and max being equal
+    {
+        state.status = "Not enough data to plot with current selections.";
         return;
+    }
     // min max for axes labels
     time_alt.x_min = data_res->GetValue<float>(5, 0);
     time_alt.x_max = data_res->GetValue<float>(6, 0);
@@ -210,7 +213,7 @@ void Graphics::ProcessColor(QueryResult &res)
     }
 }
 
-void Graphics::Render()
+void Graphics::Render(Plot *one)
 {
     if (count.vhf <= 1)
     {
@@ -220,11 +223,17 @@ void Graphics::Render()
 
     for (Plot *p : plots)
     {
+        if (one && p != one)
+            continue;
         glBindFramebuffer(GL_FRAMEBUFFER, p->fbo);
         glViewport(0, 0, p->rect.w, p->rect.h);
         glClearColor(state.style.color.same, state.style.color.same, state.style.color.same, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        glm::mat4 proj = glm::ortho(p->x_min, p->x_max, p->y_max, p->y_min, -1.0f, 1.0f);
+        float xr = p->x_max - p->x_min;
+        float yr = p->y_max - p->y_min;
+        glm::mat4 proj = glm::ortho(p->x_min + p->uv_x * xr, p->x_min + (p->uv_x + p->zoom) * xr,
+                                    p->y_min + (p->uv_y + p->zoom) * yr, p->y_min + p->uv_y * yr,
+                                    -1.0f, 1.0f);
         if (p == &alt_hist) // histogram
         {
             glBindVertexArray(p->vhf.vao);
@@ -301,17 +310,17 @@ void Graphics::UpdateTickLabels()
         time_alt.x_major_ticks[i] = std::format("{:02}:{:02}:{:02}.{:03}", h, m, s, ms);
         lon_alt.x_major_ticks[i] = std::format("{:.4f}", lon_alt.x_min + (lon_alt.uv_x + t * lon_alt.zoom) * (lon_alt.x_max - lon_alt.x_min));
         lon_lat.x_major_ticks[i] = std::format("{:.4f}", lon_lat.x_min + (lon_lat.uv_x + t * lon_lat.zoom) * (lon_lat.x_max - lon_lat.x_min));
-        lon_lat.y_major_ticks[4 - i] = std::format("{:.4f}", lon_lat.y_min + (lon_lat.uv_y + t * lon_lat.zoom) * (lon_lat.y_max - lon_lat.y_min));
-        alt_lat.y_major_ticks[4 - i] = std::format("{:.4f}", alt_lat.y_min + (alt_lat.uv_y + t * alt_lat.zoom) * (alt_lat.y_max - alt_lat.y_min));
+        lon_lat.y_major_ticks[i] = std::format("{:.4f}", lon_lat.y_min + (lon_lat.uv_y + t * lon_lat.zoom) * (lon_lat.y_max - lon_lat.y_min));
+        alt_lat.y_major_ticks[i] = std::format("{:.4f}", alt_lat.y_min + (alt_lat.uv_y + t * alt_lat.zoom) * (alt_lat.y_max - alt_lat.y_min));
     }
     for (unsigned int i = 0; i < 3; i++)
     {
         float t = 0.2f + i * 0.3f;
 
-        time_alt.y_major_ticks[2 - i] = std::format("{:.1f}", time_alt.y_min + (time_alt.uv_y + t * time_alt.zoom) * (time_alt.y_max - time_alt.y_min));
+        time_alt.y_major_ticks[i] = std::format("{:.1f}", time_alt.y_min + (time_alt.uv_y + t * time_alt.zoom) * (time_alt.y_max - time_alt.y_min));
         alt_hist.x_major_ticks[i] = std::format("{:.1f}", alt_hist.x_min + (alt_hist.uv_x + t * alt_hist.zoom) * (alt_hist.x_max - alt_hist.x_min));
-        alt_hist.y_major_ticks[2 - i] = std::format("{:.1f}", alt_hist.y_min + (alt_hist.uv_y + t * alt_hist.zoom) * (alt_hist.y_max - alt_hist.y_min));
-        lon_alt.y_major_ticks[2 - i] = std::format("{:.1f}", lon_alt.y_min + (lon_alt.uv_y + t * lon_alt.zoom) * (lon_alt.y_max - lon_alt.y_min));
+        alt_hist.y_major_ticks[i] = std::format("{:.1f}", alt_hist.y_min + (alt_hist.uv_y + t * alt_hist.zoom) * (alt_hist.y_max - alt_hist.y_min));
+        lon_alt.y_major_ticks[i] = std::format("{:.1f}", lon_alt.y_min + (lon_alt.uv_y + t * lon_alt.zoom) * (lon_alt.y_max - lon_alt.y_min));
         alt_lat.x_major_ticks[i] = std::format("{:.1f}", alt_lat.x_min + (alt_lat.uv_x + t * alt_lat.zoom) * (alt_lat.x_max - alt_lat.x_min));
     }
 }

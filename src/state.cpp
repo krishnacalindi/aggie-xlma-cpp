@@ -96,7 +96,7 @@ void State::EntlnFilter()
         "CAST(EPOCH_NS(timestamp::TIMESTAMP) - EPOCH_NS(day) AS FLOAT) AS time, "
         "longitude::FLOAT AS lon, "
         "latitude::FLOAT AS lat, "
-        "CASE WHEN type = 1 THEN icheight::FLOAT / 1000.0 ELSE 1.0 END AS alt, "
+        "CASE WHEN type = 1 THEN icheight::FLOAT / 1000.0 ELSE 4.0 END AS alt, "
         "CASE WHEN type = 40 THEN 0.0 ELSE type::FLOAT END AS l_type, "
         "peakcurrent::FLOAT AS charge, "
         "SUM(CASE WHEN type = 40 OR type = 0 THEN 1 ELSE 0 END) OVER() AS cg_count "

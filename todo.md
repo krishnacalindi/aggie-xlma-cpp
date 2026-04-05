@@ -8,7 +8,6 @@
 
 ### Planned
 - Flash algorithms: XLMA, McCaul
-- Input: ENTLN
 - Interactivity: left-click to start selection / right-click to end (DuckDB spatial)
 
 ### Future
