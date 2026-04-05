@@ -16,6 +16,8 @@ find_package(ZLIB REQUIRED)
 include_directories(${CMAKE_SOURCE_DIR}/src)
 
 set(SOURCES
+    src/shader.cpp
+    src/graphics.cpp
     src/state.cpp
     src/main.cpp
 )
@@ -41,6 +43,7 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 )
 
 if(WIN32)
+    target_sources(${PROJECT_NAME} PRIVATE resources.rc)
     target_link_libraries(${PROJECT_NAME} PRIVATE opengl32)
 elseif(APPLE)
     find_library(OPENGL_LIBRARY OpenGL)

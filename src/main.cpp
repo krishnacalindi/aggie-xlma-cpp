@@ -1,5 +1,6 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
 #define GIF_FLIP_VERT
 
 #include <imgui.h>
@@ -12,11 +13,12 @@
 #include <regex>
 #include <state.h>
 #include "stb_image_write.h"
+#include "stb_image.h"
 #include <ctime>
 
 duckdb::DuckDB db(nullptr); // in memory databse
 duckdb::Connection con(db); // connection to database
-static State state;         // state of application
+State state;                // state of application
 GLFWwindow *window = nullptr;
 // rotation logic obtained from https://github.com/ocornut/imgui/issues/705
 inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, ImU32 color_32)
@@ -70,7 +72,7 @@ void RenderUI()
                         con.Query("DROP TABLE IF EXISTS lma");
                         con.Query("CREATE TABLE lma (datetime TIMESTAMP_NS, lat FLOAT, lon FLOAT, alt FLOAT, chi FLOAT, pdb FLOAT, number_stations UTINYINT, plot BOOLEAN)");
 
-                        state.graphics.filepath = selection[0];
+                        state.graphics.ReadStations(selection[0]);
 
                         std::regex date_pattern(R"(.*\w+_(\d+)_\d+_\d+\.dat)");
                         std::unordered_map<int64_t, std::vector<std::string>> files_by_day; // grouping files per day to take advantage of DuckDB multi file reading
@@ -141,7 +143,7 @@ void RenderUI()
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Open LYLOUT files ending with .dat or .dat.gz.");
 
-            if (ImGui::MenuItem("ENTLN/NLDN"))
+            if (ImGui::MenuItem("ENTLN"))
             {
                 auto selection = pfd::open_file(
                                      "Select ENTLN/NLDN file(s)",
@@ -149,9 +151,41 @@ void RenderUI()
                                      {"ENTLN/NLDN files", "*.csv *.txt"},
                                      pfd::opt::multiselect)
                                      .result();
+
+                if (!selection.empty())
+                {
+
+                    state.timer.Start();
+                    try
+                    {
+                        std::string paths_sql = "[";
+                        for (size_t i = 0; i < selection.size(); ++i)
+                        {
+                            paths_sql += "'" + selection[i] + "'";
+                            if (i + 1 < selection.size())
+                                paths_sql += ",";
+                        }
+                        paths_sql += "]";
+
+                        con.Query("DROP TABLE IF EXISTS entln");
+                        std::string entln_query =
+                            "CREATE TABLE entln AS SELECT * FROM read_csv(" + paths_sql + ", "
+                                                                                          "auto_detect=false, delim=',', new_line='\\n', skip=0, header=true, "
+                                                                                          "columns={'type': 'BIGINT', 'timestamp': 'TIMESTAMP', 'latitude': 'DOUBLE', "
+                                                                                          "'longitude': 'DOUBLE', 'peakcurrent': 'BIGINT', 'icheight': 'BIGINT', "
+                                                                                          "'numbersensor': 'BIGINT', 'majoraxis': 'DOUBLE', 'minoraxis': 'DOUBLE', "
+                                                                                          "'bearing': 'VARCHAR'})";
+                        con.Query(entln_query);
+                        state.EntlnFilter();
+                    }
+                    catch (const std::exception &e)
+                    {
+                        state.status = "Exception " + std::string(e.what()) + " happened when trying to load files.";
+                    }
+                }
             }
             if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("Open ENTLN/NLDN lightning data for Cloud-to-Ground lightning data.");
+                ImGui::SetTooltip("Open ENTLN lightning data.");
 
             if (ImGui::MenuItem("State"))
             {
@@ -171,7 +205,7 @@ void RenderUI()
                 {
                     if (!save.ends_with(".gif"))
                         save += "gif";
-                    state.ClearPlot();
+                    state.graphics.ClearPlot();
                     state.StartSaveGIF(save);
                     state.timer.Start();
                     state.anime.Start();
@@ -253,7 +287,7 @@ void RenderUI()
 
             if (ImGui::MenuItem("Reset", "F5"))
             {
-                for (State::Plot *p : state.plots)
+                for (Graphics::Plot *p : state.graphics.plots)
                 {
                     p->uv_x = 0.0f;
                     p->uv_y = 0.0f;
@@ -267,7 +301,7 @@ void RenderUI()
             {
                 con.Query("DROP TABLE IF EXISTS lma");
                 con.Query("DROP TABLE IF EXISTS ctg");
-                state.ClearPlot();
+                state.graphics.ClearPlot();
             }
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("Clear all current data and plots.");
@@ -396,7 +430,17 @@ void RenderUI()
     if (ImGui::Combo("Maps", &state.graphics.map.index, state.graphics.map.options.data(), state.graphics.map.options.size()))
     {
         state.timer.Start();
-        state.Render();
+        state.graphics.Render();
+    }
+    if (ImGui::Checkbox("ENTLN IC&CC", &state.graphics.entln.ic))
+    {
+        state.timer.Start();
+        state.graphics.Render();
+    }
+    if (ImGui::Checkbox("ENTLN CG", &state.graphics.entln.cg))
+    {
+        state.timer.Start();
+        state.graphics.Render();
     }
 
     // colors
@@ -405,7 +449,7 @@ void RenderUI()
     if (ImGui::Combo("Colormaps", &state.graphics.colormap.index, state.graphics.colormap.options.data(), state.graphics.colormap.options.size()))
     {
         state.timer.Start();
-        state.Render();
+        state.graphics.Render();
     }
     if (ImGui::Combo("Color by", &state.graphics.colormap.by_index, state.graphics.colormap.by_options.data(), state.graphics.colormap.by_options.size()))
     {
@@ -423,7 +467,8 @@ void RenderUI()
     {
         state.timer.Start();
         state.style.size.vhf = std::clamp(state.style.size.vhf, 1, 10);
-        state.SetVHFShader();
+        state.graphics.shader.UpdateVHFShader(state.style.size.vhf);
+        state.graphics.Render();
     }
     if (ImGui::RadioButton("Light", state.style.mode == State::Style::Mode::Light))
         state.Flip();
@@ -454,7 +499,7 @@ void RenderUI()
     static const float three_ticks[] = {0.2f, 0.5f, 0.8f};
     static const float five_ticks[] = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};
     // lamba helper for cleaner appearence
-    auto plot = [&](const char *id, State::Plot *p, ImVec2 size, int y_ticks, int x_ticks)
+    auto plot = [&](const char *id, Graphics::Plot *p, ImVec2 size, int y_ticks, int x_ticks)
     {
         const float *y_pos = y_ticks == 3 ? three_ticks : five_ticks;
         const float *x_pos = x_ticks == 3 ? three_ticks : five_ticks;
@@ -507,13 +552,13 @@ void RenderUI()
         }
         ImGui::EndChild();
     };
-    plot("##TimeAltitude", &state.time_alt, ImVec2(-1, fixed_plot_height), 3, 5);
-    plot("##LongitudeAltitude", &state.lon_alt, ImVec2(fixed_plot_width, fixed_plot_height), 3, 5);
+    plot("##TimeAltitude", &state.graphics.time_alt, ImVec2(-1, fixed_plot_height), 3, 5);
+    plot("##LongitudeAltitude", &state.graphics.lon_alt, ImVec2(fixed_plot_width, fixed_plot_height), 3, 5);
     ImGui::SameLine();
-    plot("##AltitudeHistogram", &state.alt_hist, ImVec2(-1, fixed_plot_height), 3, 3);
-    plot("##LongitudeLatitude", &state.lon_lat, ImVec2(fixed_plot_width, -1), 5, 5);
+    plot("##AltitudeHistogram", &state.graphics.alt_hist, ImVec2(-1, fixed_plot_height), 3, 3);
+    plot("##LongitudeLatitude", &state.graphics.lon_lat, ImVec2(fixed_plot_width, -1), 5, 5);
     ImGui::SameLine();
-    plot("##AltitudeLatitude", &state.alt_lat, ImVec2(-1, -1), 5, 3);
+    plot("##AltitudeLatitude", &state.graphics.alt_lat, ImVec2(-1, -1), 5, 3);
 
     ImGui::EndChild();
     ImGui::PopStyleVar(2);
@@ -528,7 +573,7 @@ void RenderUI()
     {
         for (int i = 0; i < 5; i++)
         {
-            State::Plot *p = state.plots[i];
+            Graphics::Plot *p = state.graphics.plots[i];
             p->uv_x = 0.0f;
             p->uv_y = 0.0f;
             p->zoom = 1.0f;
@@ -542,7 +587,7 @@ void RenderUI()
     {
         for (int i = 0; i < 5; i++)
         {
-            State::Plot *p = state.plots[i];
+            Graphics::Plot *p = state.graphics.plots[i];
             if (mouse.x >= p->rect.x && mouse.y >= p->rect.y &&
                 mouse.x <= p->rect.x + p->rect.w && mouse.y <= p->rect.y + p->rect.h)
             {
@@ -559,13 +604,14 @@ void RenderUI()
                 break;
             }
         }
+        state.graphics.UpdateTickLabels();
     }
     if (ImGui::GetIO().MouseDown[1])
     {
         ImVec2 delta = ImGui::GetIO().MouseDelta;
         for (int i = 0; i < 5; i++)
         {
-            State::Plot *p = state.plots[i];
+            Graphics::Plot *p = state.graphics.plots[i];
             if (mouse.x >= p->rect.x && mouse.y >= p->rect.y &&
                 mouse.x <= p->rect.x + p->rect.w && mouse.y <= p->rect.y + p->rect.h)
             {
@@ -576,6 +622,7 @@ void RenderUI()
                 break;
             }
         }
+        state.graphics.UpdateTickLabels();
     }
     ImGui::End();
 }
@@ -604,6 +651,15 @@ int main()
     const GLFWvidmode *mode = glfwGetVideoMode(primary);
     window = glfwCreateWindow(mode->width, mode->height, "Aggie XLMA", nullptr, nullptr);
 
+    // icon
+    GLFWimage icon;
+    icon.pixels = stbi_load("bin/xlma.png", &icon.width, &icon.height, nullptr, 4);
+    if (icon.pixels)
+    {
+        glfwSetWindowIcon(window, 1, &icon);
+        stbi_image_free(icon.pixels);
+    }
+
     if (!window)
     {
         std::cerr << "Failed to create GLFW window\n";
@@ -629,6 +685,17 @@ int main()
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
+
+    // initial renderui so i can initialize shaders, textures, fbo
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    RenderUI();
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    glfwSwapBuffers(window);
+    state.graphics.Initialize();
+    state.graphics.ClearPlot();
 
     while (!glfwWindowShouldClose(window))
     {
