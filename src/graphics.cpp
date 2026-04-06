@@ -97,14 +97,23 @@ void Graphics::ProcessResult(QueryResult &data_res, QueryResult &hist_res)
         return;
     }
     // min max for axes labels
-    time_alt.x_min = data_res->GetValue<float>(5, 0);
-    time_alt.x_max = data_res->GetValue<float>(6, 0);
-    time_alt.y_min = lon_alt.y_min = alt_hist.y_min = alt_lat.x_min = data_res->GetValue<float>(11, 0);
-    time_alt.y_max = lon_alt.y_max = alt_hist.y_max = alt_lat.x_max = data_res->GetValue<float>(12, 0);
-    lon_alt.x_min = lon_lat.x_min = data_res->GetValue<float>(7, 0);
-    lon_alt.x_max = lon_lat.x_max = data_res->GetValue<float>(8, 0);
-    alt_lat.y_min = lon_lat.y_min = data_res->GetValue<float>(9, 0);
-    alt_lat.y_max = lon_lat.y_max = data_res->GetValue<float>(10, 0);
+    auto chunk = data_res->Fetch();
+    float *min_time  = duckdb::FlatVector::GetData<float>(chunk->data[5]);
+    float *max_time  = duckdb::FlatVector::GetData<float>(chunk->data[6]);
+    float *min_lon   = duckdb::FlatVector::GetData<float>(chunk->data[7]);
+    float *max_lon   = duckdb::FlatVector::GetData<float>(chunk->data[8]);
+    float *min_lat   = duckdb::FlatVector::GetData<float>(chunk->data[9]);
+    float *max_lat   = duckdb::FlatVector::GetData<float>(chunk->data[10]);
+    float *min_alt   = duckdb::FlatVector::GetData<float>(chunk->data[11]);
+    float *max_alt   = duckdb::FlatVector::GetData<float>(chunk->data[12]);
+    time_alt.x_min = min_time[0];
+    time_alt.x_max = max_time[0];
+    time_alt.y_min = lon_alt.y_min = alt_hist.y_min = alt_lat.x_min = min_alt[0];
+    time_alt.y_max = lon_alt.y_max = alt_hist.y_max = alt_lat.x_max = max_alt[0];
+    lon_alt.x_min = lon_lat.x_min = min_lon[0];
+    lon_alt.x_max = lon_lat.x_max = max_lon[0];
+    alt_lat.y_min = lon_lat.y_min = min_lat[0];
+    alt_lat.y_max = lon_lat.y_max = max_lat[0];
     alt_hist.x_min = hist_res->GetValue<float>(2, 0);
     alt_hist.x_max = hist_res->GetValue<float>(3, 0);
     UpdateTickLabels();
@@ -114,7 +123,7 @@ void Graphics::ProcessResult(QueryResult &data_res, QueryResult &hist_res)
     glBufferData(GL_ARRAY_BUFFER, count.vhf * 5 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
     float *vhf_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
     size_t chunk_i = 0; // global index
-    while (auto chunk = data_res->Fetch())
+    while (chunk)
     {
         float *time_data = duckdb::FlatVector::GetData<float>(chunk->data[0]);
         float *lon_data = duckdb::FlatVector::GetData<float>(chunk->data[1]);
@@ -131,6 +140,7 @@ void Graphics::ProcessResult(QueryResult &data_res, QueryResult &hist_res)
             vhf_ptr[(chunk_i + i) * 5 + 4] = color_data[i];
         }
         chunk_i += row_count;
+        chunk = data_res->Fetch();
     }
     glUnmapBuffer(GL_ARRAY_BUFFER);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -155,7 +165,8 @@ void Graphics::ProcessResult(QueryResult &data_res, QueryResult &hist_res)
     glUnmapBuffer(GL_ARRAY_BUFFER);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    Render();
+    // color
+    state.Color();
 }
 
 void Graphics::ProcessEntlnResult(QueryResult &entln_res)
@@ -289,7 +300,7 @@ void Graphics::Render(Plot *one)
         }
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
-    state.status = "Plotted " + std::to_string(count.vhf) + " sources in " + std::to_string(state.timer.End()) + "ms";
+    // state.status = "Plotted " + std::to_string(count.vhf) + " sources in " + std::to_string(state.timer.End()) + "ms";
 }
 
 void Graphics::UpdateTickLabels()
@@ -377,6 +388,17 @@ void Graphics::ReadStations(const std::string &filepath)
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 }
 
+void Graphics::Reset()
+{
+    // clears all plots with black for now
+    for (Plot *p : plots)
+    {
+        p->zoom = 1.0f;
+        p->uv_x = 0.0f;
+        p->uv_y = 0.0f;
+    }
+}
+
 void Graphics::ClearPlot()
 {
     // clears all plots with black for now
@@ -387,5 +409,8 @@ void Graphics::ClearPlot()
         glClearColor(state.style.color.same, state.style.color.same, state.style.color.same, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        p->zoom = 1.0f;
+        p->uv_x = 0.0f;
+        p->uv_y = 0.0f;
     }
 }

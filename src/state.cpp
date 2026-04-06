@@ -8,7 +8,7 @@ std::string State::ColorBy()
     switch (graphics.colormap.by_index)
     {
     case 0:
-        return "(time - b.min_time) / (b.max_time - b.min_time)";
+        return "(t.epoch - b.min_time) / (b.max_time - b.min_time)";
     case 1:
         return "(t.row_idx - 1)::FLOAT / (t.total_rows - 1)::FLOAT";
     case 2:
@@ -24,7 +24,7 @@ std::string State::ColorBy()
     case 7:
         return "(pdb - b.min_pdb) / (b.max_pdb - b.min_pdb)";
     default:
-        return "(time - b.min_time) / (b.max_time - b.min_time)";
+        return "(t.epoch - b.min_time) / (b.max_time - b.min_time)";
     }
 }
 
@@ -42,34 +42,93 @@ void State::Filter()
 
     // getting data
     std::string data_query =
-        "WITH bins AS ("
-        "SELECT FLOOR(lon / 0.01) AS bin_lon, FLOOR(lat / 0.01) AS bin_lat, COUNT(*) AS bin_count "
-        "FROM lma WHERE plot = true GROUP BY bin_lon, bin_lat"
-        "), "
-        "density AS ("
-        "SELECT MAX(bin_count) AS max_c, MAX(LN(bin_count)) AS max_lc FROM bins"
-        "), "
-        "times AS ("
-        "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time, "
-        "ROW_NUMBER() OVER (ORDER BY datetime) AS row_idx, "
-        "COUNT(*) OVER () AS total_rows "
-        "FROM lma WHERE plot = true"
-        "), "
-        "bounds AS ("
-        "SELECT MIN(time) AS min_time, MAX(time) AS max_time, "
+        "WITH bounds AS ("
+        "SELECT MIN(epoch) AS min_time, MAX(epoch) AS max_time, "
         "MIN(lon) AS min_lon, MAX(lon) AS max_lon, "
         "MIN(lat) AS min_lat, MAX(lat) AS max_lat, "
-        "MIN(alt) AS min_alt, MAX(alt) AS max_alt, "
-        "MIN(pdb) AS min_pdb, MAX(pdb) AS max_pdb FROM times"
+        "MIN(alt) AS min_alt, MAX(alt) AS max_alt "
+        "FROM lma WHERE plot = true"
         ") "
-        "SELECT t.time, t.lon, t.lat, t.alt, " +
-        ColorBy() + " AS color, "
-                    "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt, b.min_pdb, b.max_pdb "
-                    "FROM times t "
-                    "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
-                    "CROSS JOIN density d "
-                    "CROSS JOIN bounds b "
-                    "ORDER BY t.time";
+        "SELECT t.epoch, t.lon, t.lat, t.alt, CAST(0.5 AS FLOAT) AS color, "
+        "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt "
+        "FROM lma t "
+        "CROSS JOIN bounds b "
+        "WHERE t.plot = true "
+        "ORDER BY t.epoch";
+    auto data_result = con.Query(data_query);
+
+    // histogram (done seperately as size of output differs)
+    std::string hist_query = "SELECT "
+                             "FLOOR(alt / 0.1) * 0.1 AS bin, "
+                             "COUNT(*)::FLOAT AS count, "
+                             "MIN(COUNT(*)) OVER() AS min_count, "
+                             "MAX(COUNT(*)) OVER() AS max_count "
+                             "FROM lma "
+                             "WHERE plot = true AND alt >= 0 AND alt <= 20 GROUP BY bin "
+                             "ORDER BY bin";
+    auto hist_result = con.Query(hist_query);
+
+    graphics.ProcessResult(data_result, hist_result);
+}
+
+void State::SpatialFilter()
+{
+    // spatial query
+    if (polyselect.plot == &graphics.alt_hist)
+    {
+        status = "Spatial filter not supported for histogram.";
+        return;
+    }
+
+
+    std::string wkt = "POLYGON((";
+    for (int i = 0; i < polyselect.xs.size(); i++)
+        wkt += std::to_string(polyselect.xs[i]) + " " + std::to_string(polyselect.ys[i]) + ",";
+    wkt += std::to_string(polyselect.xs[0]) + " " + std::to_string(polyselect.ys[0]) + "))";
+
+    std::string col_x, col_y;
+    if (polyselect.plot == &graphics.time_alt)
+    {
+        col_x = "epoch";
+        col_y = "alt";
+    }
+    else if (polyselect.plot == &graphics.lon_alt)
+    {
+        col_x = "lon";
+        col_y = "alt";
+    }
+    else if (polyselect.plot == &graphics.lon_lat)
+    {
+        col_x = "lon";
+        col_y = "lat";
+    }
+    else if (polyselect.plot == &graphics.alt_lat)
+    {
+        col_x = "alt";
+        col_y = "lat";
+    }
+
+    std::string spatial_query = "UPDATE lma SET plot = (plot AND " +
+                                std::string(polyselect.keep ? "" : "NOT ") +
+                                "ST_Contains(ST_GeomFromText('" + wkt + "')::POLYGON_2D, ST_Point2D(" + col_x + ", " + col_y + "))) WHERE plot = true";
+    con.Query(spatial_query);
+
+    // do normal query and histogram query again
+    // getting data
+    std::string data_query =
+        "WITH bounds AS ("
+        "SELECT MIN(epoch) AS min_time, MAX(epoch) AS max_time, "
+        "MIN(lon) AS min_lon, MAX(lon) AS max_lon, "
+        "MIN(lat) AS min_lat, MAX(lat) AS max_lat, "
+        "MIN(alt) AS min_alt, MAX(alt) AS max_alt "
+        "FROM lma WHERE plot = true"
+        ") "
+        "SELECT t.epoch, t.lon, t.lat, t.alt, CAST(0.5 AS FLOAT) AS color, "
+        "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt "
+        "FROM lma t "
+        "CROSS JOIN bounds b "
+        "WHERE t.plot = true "
+        "ORDER BY t.epoch";
     auto data_result = con.Query(data_query);
 
     // histogram (done seperately as size of output differs)
@@ -108,7 +167,6 @@ void State::EntlnFilter()
 
 void State::Color()
 {
-    timer.Start();
     std::string color_query =
         "WITH bins AS ("
         "SELECT FLOOR(lon / 0.01) AS bin_lon, FLOOR(lat / 0.01) AS bin_lat, COUNT(*) AS bin_count "
@@ -118,17 +176,17 @@ void State::Color()
         "SELECT MAX(bin_count) AS max_c, MAX(LN(bin_count)) AS max_lc FROM bins"
         "), "
         "times AS ("
-        "SELECT *, CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', MIN(datetime) OVER ())) AS FLOAT) AS time, "
+        "SELECT *, "
         "ROW_NUMBER() OVER (ORDER BY datetime) AS row_idx, "
         "COUNT(*) OVER () AS total_rows "
         "FROM lma WHERE plot = true"
         "), "
         "bounds AS ("
-        "SELECT MIN(time) AS min_time, MAX(time) AS max_time, "
+        "SELECT MIN(t.epoch) AS min_time, MAX(t.epoch) AS max_time, "
         "MIN(lon) AS min_lon, MAX(lon) AS max_lon, "
         "MIN(lat) AS min_lat, MAX(lat) AS max_lat, "
         "MIN(alt) AS min_alt, MAX(alt) AS max_alt, "
-        "MIN(pdb) AS min_pdb, MAX(pdb) AS max_pdb FROM times"
+        "MIN(pdb) AS min_pdb, MAX(pdb) AS max_pdb FROM times t"
         ") "
         "SELECT " +
         ColorBy() + " AS color "
@@ -136,7 +194,7 @@ void State::Color()
                     "JOIN bins k ON FLOOR(t.lon / 0.01) = k.bin_lon AND FLOOR(t.lat / 0.01) = k.bin_lat "
                     "CROSS JOIN density d "
                     "CROSS JOIN bounds b "
-                    "ORDER BY t.time";
+                    "ORDER BY t.epoch";
 
     auto result = con.Query(color_query);
     graphics.ProcessColor(result);

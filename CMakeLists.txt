@@ -18,6 +18,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 set(SOURCES
     src/shader.cpp
     src/graphics.cpp
+    src/select.cpp
     src/state.cpp
     src/main.cpp
 )

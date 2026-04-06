@@ -7,8 +7,7 @@
 ## Minor
 
 ### Planned
-- Flash algorithms: XLMA, McCaul
-- Interactivity: left-click to start selection / right-click to end (DuckDB spatial)
+- Seperate spatial, and filter masks to be more intuitive
 
 ### Future
 - More responsive axes, minor ticks, etc.
@@ -20,3 +19,4 @@
 - Additional XLMA options: 3D view, time-height, chi-squared plot, NLDN replot, lightning graph, residuals, station count histogram, raw data plots, quality, balloon, sferics, radar, NLDN animation, marker, aircraft trajectory, seismic, slow antenna, AZ-EL-time-distance plot
 - More helpful help menu options
 - NOAA CWA map option
+- Flash algorithms: XLMA, McCaul 

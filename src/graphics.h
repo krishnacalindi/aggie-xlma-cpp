@@ -76,6 +76,7 @@ struct Graphics
     void UpdateTickLabels();                        // updates tick label based on min, max, zoom
     void ReadStations(const std::string &filepath); // reads lma station info from a filepath and populates station vbo
     void ClearPlot();                               // clears plots
+    void Reset();
 
 private:
     void _setup_vao(GLuint &vao, GLuint vbo, int stride = 2, std::initializer_list<int> offsets = {0, 1}); // helper to setup vao

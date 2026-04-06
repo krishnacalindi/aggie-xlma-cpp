@@ -70,9 +70,10 @@ void RenderUI()
                     try
                     {
                         con.Query("DROP TABLE IF EXISTS lma");
-                        con.Query("CREATE TABLE lma (datetime TIMESTAMP_NS, lat FLOAT, lon FLOAT, alt FLOAT, chi FLOAT, pdb FLOAT, number_stations UTINYINT, plot BOOLEAN)");
-
+                        con.Query("CREATE TABLE lma (datetime TIMESTAMP_NS, lat FLOAT, lon FLOAT, alt FLOAT, chi FLOAT, pdb FLOAT, number_stations UTINYINT, plot BOOLEAN DEFAULT true, epoch FLOAT)");
+                        
                         state.graphics.ReadStations(selection[0]);
+                        state.graphics.Reset(); // resetting zoom and pan
 
                         std::regex date_pattern(R"(.*\w+_(\d+)_\d+_\d+\.dat)");
                         std::unordered_map<int64_t, std::vector<std::string>> files_by_day; // grouping files per day to take advantage of DuckDB multi file reading
@@ -118,9 +119,9 @@ void RenderUI()
                                 "SELECT "
                                 "TRY(MAKE_TIMESTAMP_NS(CAST((CAST(arr[1] AS DOUBLE) + " +
                                 std::to_string(day_epoch) + ") * 1E9 AS BIGINT))), "
-                                                            "TRY_CAST(arr[2] AS DOUBLE), "
-                                                            "TRY_CAST(arr[3] AS DOUBLE), "
-                                                            "TRY(CAST(arr[4] AS DOUBLE) / 1000), "
+                                                            "TRY_CAST(arr[2] AS FLOAT), "
+                                                            "TRY_CAST(arr[3] AS FLOAT), "
+                                                            "TRY(CAST(arr[4] AS FLOAT) / 1000), "
                                                             "TRY_CAST(arr[5] AS FLOAT), "
                                                             "TRY_CAST(arr[6] AS FLOAT), "
                                                             "CAST(bit_count(TRY_CAST(arr[7] AS INTEGER)) AS UTINYINT) "
@@ -130,6 +131,7 @@ void RenderUI()
                                 paths_sql + ", auto_detect=false, delim='|', quote='\"', escape='\"', "
                                             "new_line='\\n', comment='', columns={'column0':'VARCHAR'}, header=false, skip=53)"
                                             ") t;");
+                            con.Query("UPDATE lma SET epoch = CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', (SELECT MIN(datetime) FROM lma))) AS FLOAT)");
                         }
                         state.status = "Loaded " + std::to_string(selection.size()) + " files";
                         state.Filter();
@@ -445,6 +447,16 @@ void RenderUI()
         state.graphics.Render();
     }
 
+    // selection: keep/remove
+    ImGui::Text("Select");
+    if (ImGui::RadioButton("Keep", state.polyselect.keep == true))
+        state.polyselect.keep = true;
+    ImGui::SameLine();
+    if (ImGui::RadioButton("Remove", state.polyselect.keep == false))
+        state.polyselect.keep = false;
+    if (ImGui::Button("Cancel"))
+        state.polyselect.Reset();
+
     // colors
     ImGui::Text("Colors");
 
@@ -560,7 +572,7 @@ void RenderUI()
         bool hovered = mouse.x >= p->rect.x && mouse.y >= p->rect.y &&
                        mouse.x <= p->rect.x + p->rect.w && mouse.y <= p->rect.y + p->rect.h;
         // zoom
-        if (scroll != 0.0f && hovered)
+        if (!state.polyselect.selecting && scroll != 0.0f && hovered)
         {
             float mx = (mouse.x - p->rect.x) / p->rect.w;
             float my = (mouse.y - p->rect.y) / p->rect.h;
@@ -576,16 +588,36 @@ void RenderUI()
             state.graphics.Render(p);
         }
         // pan
-        if (ImGui::GetIO().MouseDown[1] && hovered)
+        // if (!state.polyselect.selecting && ImGui::GetIO().MouseDown[1] && hovered)
+        // {
+        //     ImVec2 delta = ImGui::GetIO().MouseDelta;
+        //     // 0.5 is sensitivity, feel free to tune it
+        //     p->uv_x -= (delta.x / p->rect.w) * p->zoom * 0.5f;
+        //     p->uv_y += (delta.y / p->rect.h) * p->zoom * 0.5f;
+        //     p->uv_x = std::clamp(p->uv_x, 0.0f, 1.0f - p->zoom);
+        //     p->uv_y = std::clamp(p->uv_y, 0.0f, 1.0f - p->zoom);
+        //     state.graphics.UpdateTickLabels();
+        //     state.graphics.Render(p);
+        // }
+        // selecting
+        if (ImGui::IsMouseClicked(0) && hovered) // left click
+            state.polyselect.Add(mouse, p);
+        if (state.polyselect.selecting && ImGui::IsMouseClicked(1) && hovered) // right click
+            state.polyselect.Add(mouse, p, true);
+        if (state.polyselect.selecting && state.polyselect.plot == p && hovered)
         {
-            ImVec2 delta = ImGui::GetIO().MouseDelta; 
-            // 0.5 is sensitivity, feel free to tune it
-            p->uv_x -= (delta.x / p->rect.w) * p->zoom * 0.5f;
-            p->uv_y += (delta.y / p->rect.h) * p->zoom * 0.5f;
-            p->uv_x = std::clamp(p->uv_x, 0.0f, 1.0f - p->zoom);
-            p->uv_y = std::clamp(p->uv_y, 0.0f, 1.0f - p->zoom);
-            state.graphics.UpdateTickLabels();
-            state.graphics.Render(p);
+            ImDrawList *draw_list = ImGui::GetForegroundDrawList();
+            ImU32 color = state.polyselect.keep ? IM_COL32(0, 255, 0, 255) : IM_COL32(255, 0, 0, 255);
+            ImU32 faded = state.polyselect.keep ? IM_COL32(0, 255, 0, 128) : IM_COL32(255, 0, 0, 128);
+            for (int i = 0; i + 1 < state.polyselect.clicks.size(); i++)
+            {
+                draw_list->AddLine(state.polyselect.clicks[i], state.polyselect.clicks[i + 1], color, 2.0f);
+                draw_list->AddCircleFilled(state.polyselect.clicks[i], 4.0f, color);
+            }
+            draw_list->AddCircleFilled(state.polyselect.clicks.back(), 4.0f, color);
+            draw_list->AddLine(state.polyselect.clicks.back(), mouse, faded, 1.0f);
+            draw_list->AddLine(mouse, state.polyselect.clicks.front(), faded, 1.0f);
+            // state.status = std::format("Polygon has {} points, {}ing selection", state.polyselect.clicks.size(), state.polyselect.keep ? "keep" : "remov");
         }
     };
     plot("##TimeAltitude", &state.graphics.time_alt, ImVec2(-1, fixed_plot_height), 3, 5);
@@ -682,6 +714,8 @@ int main()
     ImGui_ImplOpenGL3_Init(glsl_version);
 
     // initial renderui so i can initialize shaders, textures, fbo
+    con.Query("INSTALL spatial");
+    con.Query("LOAD spatial"); //  loading spatial
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();

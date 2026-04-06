@@ -13,6 +13,7 @@
 #include <sstream>
 
 #include <graphics.h>
+#include <select.h>
 
 extern GLFWwindow *window;
 extern duckdb::Connection con;
@@ -107,6 +108,7 @@ struct State
     Anime anime;
     Filter filter;
     Style style;
+    PolySelect polyselect;
 
     // functions
 
@@ -115,6 +117,7 @@ struct State
     void StartSaveGIF(const std::string &path); // does gif writer initializing for saving
     void SaveGIFFrame();                        // saves current plot frame
     void Filter();                              // filters db using sql query
+    void SpatialFilter();                       // filters plotted with duckdb spatial
     void EntlnFilter();                         // entln fitler
     std::string ColorBy();                      // helper for color by query
     void Color();                               // color only query
