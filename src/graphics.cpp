@@ -5,6 +5,16 @@
 
 extern State state;
 
+float Graphics::Plot::X(float mouse_x)
+{
+    return x_min + (uv_x + (mouse_x - rect.x) / rect.w * zoom) * (x_max - x_min);
+}
+
+float Graphics::Plot::Y(float mouse_y)
+{
+    return y_min + (uv_y + (1.0f - (mouse_y - rect.y) / rect.h) * zoom) * (y_max - y_min);
+}
+
 void Graphics::_setup_vao(GLuint &vao, GLuint vbo, int stride, std::initializer_list<int> offsets)
 {
     glGenVertexArrays(1, &vao);
@@ -93,19 +103,19 @@ void Graphics::ProcessResult(QueryResult &data_res, QueryResult &hist_res)
 
     if (count.vhf <= 1) // to prevent axis collapse from min and max being equal
     {
-        state.status = "Not enough data to plot with current selections.";
+        state.status.plot = "Not enough data to plot with current selections.";
         return;
     }
     // min max for axes labels
     auto chunk = data_res->Fetch();
-    float *min_time  = duckdb::FlatVector::GetData<float>(chunk->data[5]);
-    float *max_time  = duckdb::FlatVector::GetData<float>(chunk->data[6]);
-    float *min_lon   = duckdb::FlatVector::GetData<float>(chunk->data[7]);
-    float *max_lon   = duckdb::FlatVector::GetData<float>(chunk->data[8]);
-    float *min_lat   = duckdb::FlatVector::GetData<float>(chunk->data[9]);
-    float *max_lat   = duckdb::FlatVector::GetData<float>(chunk->data[10]);
-    float *min_alt   = duckdb::FlatVector::GetData<float>(chunk->data[11]);
-    float *max_alt   = duckdb::FlatVector::GetData<float>(chunk->data[12]);
+    float *min_time = duckdb::FlatVector::GetData<float>(chunk->data[5]);
+    float *max_time = duckdb::FlatVector::GetData<float>(chunk->data[6]);
+    float *min_lon = duckdb::FlatVector::GetData<float>(chunk->data[7]);
+    float *max_lon = duckdb::FlatVector::GetData<float>(chunk->data[8]);
+    float *min_lat = duckdb::FlatVector::GetData<float>(chunk->data[9]);
+    float *max_lat = duckdb::FlatVector::GetData<float>(chunk->data[10]);
+    float *min_alt = duckdb::FlatVector::GetData<float>(chunk->data[11]);
+    float *max_alt = duckdb::FlatVector::GetData<float>(chunk->data[12]);
     time_alt.x_min = min_time[0];
     time_alt.x_max = max_time[0];
     time_alt.y_min = lon_alt.y_min = alt_hist.y_min = alt_lat.x_min = min_alt[0];
@@ -172,35 +182,38 @@ void Graphics::ProcessResult(QueryResult &data_res, QueryResult &hist_res)
 void Graphics::ProcessEntlnResult(QueryResult &entln_res)
 {
     count.entln = entln_res->RowCount();
-    count.entln_cg = entln_res->GetValue<int>(6, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, time_alt.entln.vbo);
-    glBufferData(GL_ARRAY_BUFFER, count.entln * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-    float *entln_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
-    int chunk_i = 0;
-    while (auto chunk = entln_res->Fetch())
+    if (count.entln > 0)
     {
-        float *time_data = duckdb::FlatVector::GetData<float>(chunk->data[0]);
-        float *lon_data = duckdb::FlatVector::GetData<float>(chunk->data[1]);
-        float *lat_data = duckdb::FlatVector::GetData<float>(chunk->data[2]);
-        float *alt_data = duckdb::FlatVector::GetData<float>(chunk->data[3]);
-        float *type_data = duckdb::FlatVector::GetData<float>(chunk->data[4]);
-        float *charge_data = duckdb::FlatVector::GetData<float>(chunk->data[5]);
-        size_t row_count = chunk->size();
-        for (size_t i = 0; i < row_count; i++)
+        count.entln_cg = entln_res->GetValue<int>(6, 0);
+        glBindBuffer(GL_ARRAY_BUFFER, time_alt.entln.vbo);
+        glBufferData(GL_ARRAY_BUFFER, count.entln * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
+        float *entln_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+        int chunk_i = 0;
+        while (auto chunk = entln_res->Fetch())
         {
-            entln_ptr[(chunk_i + i) * 6 + 0] = time_data[i];
-            entln_ptr[(chunk_i + i) * 6 + 1] = lon_data[i];
-            entln_ptr[(chunk_i + i) * 6 + 2] = lat_data[i];
-            entln_ptr[(chunk_i + i) * 6 + 3] = alt_data[i];
-            entln_ptr[(chunk_i + i) * 6 + 4] = type_data[i];
-            entln_ptr[(chunk_i + i) * 6 + 5] = charge_data[i];
+            float *time_data = duckdb::FlatVector::GetData<float>(chunk->data[0]);
+            float *lon_data = duckdb::FlatVector::GetData<float>(chunk->data[1]);
+            float *lat_data = duckdb::FlatVector::GetData<float>(chunk->data[2]);
+            float *alt_data = duckdb::FlatVector::GetData<float>(chunk->data[3]);
+            float *type_data = duckdb::FlatVector::GetData<float>(chunk->data[4]);
+            float *charge_data = duckdb::FlatVector::GetData<float>(chunk->data[5]);
+            size_t row_count = chunk->size();
+            for (size_t i = 0; i < row_count; i++)
+            {
+                entln_ptr[(chunk_i + i) * 6 + 0] = time_data[i];
+                entln_ptr[(chunk_i + i) * 6 + 1] = lon_data[i];
+                entln_ptr[(chunk_i + i) * 6 + 2] = lat_data[i];
+                entln_ptr[(chunk_i + i) * 6 + 3] = alt_data[i];
+                entln_ptr[(chunk_i + i) * 6 + 4] = type_data[i];
+                entln_ptr[(chunk_i + i) * 6 + 5] = charge_data[i];
+            }
+            chunk_i += row_count;
         }
-        chunk_i += row_count;
-    }
-    glUnmapBuffer(GL_ARRAY_BUFFER);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    Render();
+        Render();
+    }
 }
 
 void Graphics::ProcessColor(QueryResult &res)
@@ -228,7 +241,7 @@ void Graphics::Render(Plot *one)
 {
     if (count.vhf <= 1)
     {
-        state.status = "Not enough data to plot with current selections.";
+        state.status.plot = "Not enough data to plot with current selections.";
         return;
     }
 
@@ -238,7 +251,7 @@ void Graphics::Render(Plot *one)
             continue;
         glBindFramebuffer(GL_FRAMEBUFFER, p->fbo);
         glViewport(0, 0, p->rect.w, p->rect.h);
-        glClearColor(state.style.color.same, state.style.color.same, state.style.color.same, 1.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f); // black background
         glClear(GL_COLOR_BUFFER_BIT);
         float xr = p->x_max - p->x_min;
         float yr = p->y_max - p->y_min;
@@ -300,7 +313,6 @@ void Graphics::Render(Plot *one)
         }
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
-    // state.status = "Plotted " + std::to_string(count.vhf) + " sources in " + std::to_string(state.timer.End()) + "ms";
 }
 
 void Graphics::UpdateTickLabels()
@@ -406,7 +418,7 @@ void Graphics::ClearPlot()
     {
         glBindFramebuffer(GL_FRAMEBUFFER, p->fbo);
         glViewport(0, 0, p->rect.w, p->rect.h);
-        glClearColor(state.style.color.same, state.style.color.same, state.style.color.same, 1.0f);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         p->zoom = 1.0f;

@@ -14,9 +14,9 @@
 
 #include <graphics.h>
 #include <select.h>
+#include <style.h>
 
 extern GLFWwindow *window;
-extern duckdb::Connection con;
 
 struct State
 {
@@ -30,22 +30,6 @@ struct State
         float max_chi = 5.0;
         float min_power = -60.0;
         float max_power = 60.0;
-    };
-    struct Timer
-    {
-        // start
-        clock_t start_time;
-
-        void Start()
-        {
-            start_time = clock();
-        }
-
-        int End()
-        {
-            // returns ms since start_time
-            return (clock() - start_time) * 1000.0 / CLOCKS_PER_SEC;
-        }
     };
     struct Anime
     {
@@ -76,35 +60,23 @@ struct State
             animating = false;
         }
     };
-    struct Style
+    struct Status
     {
-        enum class Mode
-        {
-            Light,
-            Dark
-        };
-        struct Size
-        {
-            int vhf = 1;
-        };
-        struct Color
-        {
-            int as_int = 255; // int color (white if black, black if white)
-            float same = 0.0f, diff = 1.0f;
-            // float same color (black if black, white if white)
-            // float flipped color (white if black, black if white)
-        };
+        std::string global;
+        std::string plot, idle;
+    };
+    struct DB
+    {
+        duckdb::DuckDB db;
+        duckdb::Connection con;
 
-        // vars
-        Size size;
-        Mode mode = Mode::Dark;
-        Color color;
+        DB() : db(nullptr), con(db) {}
     };
 
     // variables
-    std::string status = "Let's do this! :)";
+    DB db;
+    Status status;
     Graphics graphics;
-    Timer timer;
     Anime anime;
     Filter filter;
     Style style;

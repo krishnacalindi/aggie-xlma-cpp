@@ -36,8 +36,8 @@ struct Graphics
     };
     struct Count
     {
-        unsigned int stations, entln, entln_cg;
-        unsigned long vhf;
+        unsigned int stations = 0, entln = 0, entln_cg = 0;
+        unsigned long vhf = 0;
     };
     struct Entln
     {
@@ -52,6 +52,9 @@ struct Graphics
         float x_min, x_max, y_min, y_max;
         std::array<std::string, 5> x_major_ticks = {"", "", "", "", ""};
         std::array<std::string, 5> y_major_ticks = {"", "", "", "", ""};
+
+        float X(float mouse_x); // translated X coords
+        float Y(float mouse_y); // translated Y coords
     };
 
     Shader shader;                                                         // shaders

@@ -13,10 +13,8 @@ void PolySelect::Add(ImVec2 mouse, Graphics::Plot *p, bool last)
         {
             selecting = true;
             clicks.emplace_back(mouse);
-            float x = p->x_min + (p->uv_x + (mouse.x - p->rect.x) / p->rect.w * p->zoom) * (p->x_max - p->x_min);
-            float y = p->y_min + (p->uv_y + (1.0f - (mouse.y - p->rect.y) / p->rect.h) * p->zoom) * (p->y_max - p->y_min);
-            xs.emplace_back(x);
-            ys.emplace_back(y);
+            xs.emplace_back(p->X(mouse.x));
+            ys.emplace_back(p->Y(mouse.y));
         }
         else
         {
@@ -32,6 +30,7 @@ void PolySelect::Add(ImVec2 mouse, Graphics::Plot *p, bool last)
 
 void PolySelect::Reset()
 {
+    selecting = false;
     clicks.clear();
     xs.clear();
     ys.clear();

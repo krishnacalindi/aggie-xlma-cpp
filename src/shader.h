@@ -13,9 +13,8 @@ struct Shader
     // stations: shader for lma stations
     // entln: shader for entln datas
 
-    void Initialize();                  // initailizes all shaders
-    void UpdateVHFShader(int size);     // helper for updating vhf shader size
-    void UpdateLineShader(float color); // helper for updating line shader color
+    void Initialize();              // initailizes all shaders
+    void UpdateVHFShader(int size); // helper for updating vhf shader size
 
 private:
     void _link_shader(GLuint &program, const char *vert_src, const char *frag_src); // links shader orograms with their glsl

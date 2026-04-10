@@ -67,14 +67,12 @@ void main() {
 )";
     const char *line_frag = R"(
 #version 330 core
-uniform float line_color;
 out vec4 FragColor;
 void main() {
-    FragColor = vec4(line_color, line_color, line_color, 1.0);
+    FragColor = vec4(1.0, 1.0, 1.0, 1.0);
 }
 )";
     _link_shader(line, line_vert, line_frag);
-    UpdateLineShader(1.0f);
 
     // stations shader
     const char *sta_vert = R"(
@@ -154,10 +152,4 @@ void Shader::UpdateVHFShader(int size)
 {
     glUseProgram(vhf);
     glUniform1f(glGetUniformLocation(vhf, "vhf_size"), (float)size);
-}
-
-void Shader::UpdateLineShader(float color)
-{
-    glUseProgram(line);
-    glUniform1f(glGetUniformLocation(line, "line_color"), color);
 }

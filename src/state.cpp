@@ -38,7 +38,7 @@ void State::Filter()
                                " AND chi <= " + std::to_string(filter.max_chi) +
                                " AND pdb >= " + std::to_string(filter.min_power) +
                                " AND pdb <= " + std::to_string(filter.max_power) + ");";
-    con.Query(filter_query);
+    db.con.Query(filter_query);
 
     // getting data
     std::string data_query =
@@ -55,7 +55,7 @@ void State::Filter()
         "CROSS JOIN bounds b "
         "WHERE t.plot = true "
         "ORDER BY t.epoch";
-    auto data_result = con.Query(data_query);
+    auto data_result = db.con.Query(data_query);
 
     // histogram (done seperately as size of output differs)
     std::string hist_query = "SELECT "
@@ -66,7 +66,7 @@ void State::Filter()
                              "FROM lma "
                              "WHERE plot = true AND alt >= 0 AND alt <= 20 GROUP BY bin "
                              "ORDER BY bin";
-    auto hist_result = con.Query(hist_query);
+    auto hist_result = db.con.Query(hist_query);
 
     graphics.ProcessResult(data_result, hist_result);
 }
@@ -76,10 +76,9 @@ void State::SpatialFilter()
     // spatial query
     if (polyselect.plot == &graphics.alt_hist)
     {
-        status = "Spatial filter not supported for histogram.";
+        status.global = "Spatial filter not supported for histogram.";
         return;
     }
-
 
     std::string wkt = "POLYGON((";
     for (int i = 0; i < polyselect.xs.size(); i++)
@@ -111,7 +110,7 @@ void State::SpatialFilter()
     std::string spatial_query = "UPDATE lma SET plot = (plot AND " +
                                 std::string(polyselect.keep ? "" : "NOT ") +
                                 "ST_Contains(ST_GeomFromText('" + wkt + "')::POLYGON_2D, ST_Point2D(" + col_x + ", " + col_y + "))) WHERE plot = true";
-    con.Query(spatial_query);
+    db.con.Query(spatial_query);
 
     // do normal query and histogram query again
     // getting data
@@ -129,7 +128,7 @@ void State::SpatialFilter()
         "CROSS JOIN bounds b "
         "WHERE t.plot = true "
         "ORDER BY t.epoch";
-    auto data_result = con.Query(data_query);
+    auto data_result = db.con.Query(data_query);
 
     // histogram (done seperately as size of output differs)
     std::string hist_query = "SELECT "
@@ -140,13 +139,44 @@ void State::SpatialFilter()
                              "FROM lma "
                              "WHERE plot = true AND alt >= 0 AND alt <= 20 GROUP BY bin "
                              "ORDER BY bin";
-    auto hist_result = con.Query(hist_query);
+    auto hist_result = db.con.Query(hist_query);
 
     graphics.ProcessResult(data_result, hist_result);
-}
 
-void State::EntlnFilter()
-{
+    // redoing entln time bounds
+    db.con.Query(
+        "WITH day_start AS ("
+        "SELECT MIN(datetime) AS min_dt, MAX(datetime) AS max_dt FROM lma WHERE plot = true"
+        ") "
+        "UPDATE entln SET plot = (plot AND timestamp::TIMESTAMP >= min_dt AND timestamp::TIMESTAMP <= max_dt) "
+        "FROM day_start");
+
+    // now entln spatial fitler
+    if (polyselect.plot != &graphics.time_alt) // time resync done above
+    {
+        std::string entln_col_x, entln_col_y;
+        if (polyselect.plot == &graphics.lon_alt)
+        {
+            entln_col_x = "longitude";
+            entln_col_y = "icheight / 1000.0"; // alt stored as read from the file
+        }
+        else if (polyselect.plot == &graphics.lon_lat)
+        {
+            entln_col_x = "longitude";
+            entln_col_y = "latitude";
+        }
+        else if (polyselect.plot == &graphics.alt_lat)
+        {
+            entln_col_x = "icheight / 1000.0";
+            entln_col_y = "latitude";
+        }
+
+        std::string entln_spatial_query = "UPDATE entln SET plot = (plot AND " +
+                                          std::string(polyselect.keep ? "" : "NOT ") +
+                                          "ST_Contains(ST_GeomFromText('" + wkt + "')::POLYGON_2D, ST_Point2D(" + entln_col_x + ", " + entln_col_y + "))) WHERE plot = true";
+        db.con.Query(entln_spatial_query);
+    }
+
     std::string entln_query =
         "WITH day_start AS ("
         "SELECT DATE_TRUNC('day', MIN(datetime)) AS day FROM lma WHERE plot = true"
@@ -160,8 +190,37 @@ void State::EntlnFilter()
         "peakcurrent::FLOAT AS charge, "
         "SUM(CASE WHEN type = 40 OR type = 0 THEN 1 ELSE 0 END) OVER() AS cg_count "
         "FROM entln CROSS JOIN day_start "
+        "WHERE plot = true "
         "ORDER BY l_type";
-    auto entln_result = con.Query(entln_query);
+    auto entln_result = db.con.Query(entln_query);
+    graphics.ProcessEntlnResult(entln_result);
+}
+
+void State::EntlnFilter()
+{
+    db.con.Query(
+        "WITH day_start AS ("
+        "SELECT MIN(datetime) AS min_dt, MAX(datetime) AS max_dt FROM lma WHERE plot = true"
+        ") "
+        "UPDATE entln SET plot = (timestamp::TIMESTAMP >= min_dt AND timestamp::TIMESTAMP <= max_dt) "
+        "FROM day_start");
+
+    std::string entln_query =
+        "WITH day_start AS ("
+        "SELECT DATE_TRUNC('day', MIN(datetime)) AS day FROM lma WHERE plot = true"
+        ") "
+        "SELECT "
+        "CAST(EPOCH_NS(timestamp::TIMESTAMP) - EPOCH_NS(day) AS FLOAT) AS time, "
+        "longitude::FLOAT AS lon, "
+        "latitude::FLOAT AS lat, "
+        "CASE WHEN type = 1 THEN icheight::FLOAT / 1000.0 ELSE 4.0 END AS alt, "
+        "CASE WHEN type = 40 THEN 0.0 ELSE type::FLOAT END AS l_type, "
+        "peakcurrent::FLOAT AS charge, "
+        "SUM(CASE WHEN type = 40 OR type = 0 THEN 1 ELSE 0 END) OVER() AS cg_count "
+        "FROM entln CROSS JOIN day_start "
+        "WHERE plot = true "
+        "ORDER BY l_type";
+    auto entln_result = db.con.Query(entln_query);
     graphics.ProcessEntlnResult(entln_result);
 }
 
@@ -196,17 +255,8 @@ void State::Color()
                     "CROSS JOIN bounds b "
                     "ORDER BY t.epoch";
 
-    auto result = con.Query(color_query);
+    auto result = db.con.Query(color_query);
     graphics.ProcessColor(result);
-}
-
-void State::Flip()
-{
-    timer.Start();
-    style.mode = style.mode == Style::Mode::Dark ? Style::Mode::Light : Style::Mode::Dark;
-    style.color = style.mode == Style::Mode::Dark ? Style::Color{255, 0.0f, 1.0f} : Style::Color{0, 1.0f, 0.0f};
-    graphics.shader.UpdateLineShader(style.color.diff);
-    graphics.Render();
 }
 
 void State::StartSaveGIF(const std::string &path)
@@ -262,7 +312,7 @@ void State::SaveGIFFrame()
     GifWriteFrame((GifWriter *)anime.gif, pixels.data(), graphics.rect.w, graphics.rect.h, 10);
     if (!anime.animating)
     {
-        status = "Saved animation to " + anime.gif_path;
+        status.global = "Saved animation to " + anime.gif_path;
         anime.saving = false;
         GifEnd((GifWriter *)anime.gif);
         delete (GifWriter *)anime.gif;
