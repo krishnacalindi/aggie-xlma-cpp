@@ -1,6 +1,6 @@
 #include "state.h"
 #include <format>
-#include <gif.h>
+#include <external/gif.h>
 
 // helper for color by
 std::string State::ColorBy()

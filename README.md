@@ -41,7 +41,17 @@ All tests were conducted with files from the July 12, 2022 TRACER case from the 
 - Isaac Jones
 - [Dr.Timothy Logan](https://artsci.tamu.edu/atmos-science/contact/profiles/timothy-logan.html)
 
-## References:
-McCaul , E. W., S. J. Goodman, K. M. LaCasse, and D. J. Cecil, 2009: Forecasting Lightning Threat Using Cloud-Resolving Model Simulations. Wea. Forecasting, 24, 709–729, https://doi.org/10.1175/2008WAF2222152.1.
+## References/Attribution:
+ - McCaul , E. W., S. J. Goodman, K. M. LaCasse, and D. J. Cecil, 2009: Forecasting Lightning Threat Using Cloud-Resolving Model Simulations. Wea. Forecasting, 24, 709–729, https://doi.org/10.1175/2008WAF2222152.1.
 
-gif.h: Obtained from [here](https://github.com/charlietangora/gif-h)
+ - gif.h: Obtained from [repo](https://github.com/charlietangora/gif-h)
+
+ - miniaudio.h: Obtained from [repo](https://github.com/mackron/miniaudio)
+### Background piano:
+- piano 1.wav by Nick_Simon-Adams -- https://freesound.org/s/647614/ -- License: Attribution 4.0
+- piano 2.mp3 by ShadyDave -- https://freesound.org/s/262259/ -- License: Attribution NonCommercial 4.0
+- piano 3.mp3 by Dasgoat -- https://freesound.org/s/330599/ -- License: Creative Commons 0
+- piano 4.wav by orangefreesounds -- https://freesound.org/s/340075/ -- License: Attribution 3.0
+- piano 5.wav by Andrewkn -- https://freesound.org/s/379805/ -- License: Creative Commons 0
+- piano 6. by FoolBoyMedia -- https://freesound.org/s/237268/ -- License: Attribution NonCommercial 4.0
+

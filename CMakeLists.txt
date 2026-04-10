@@ -14,6 +14,7 @@ find_package(Stb REQUIRED)
 find_package(ZLIB REQUIRED)
 
 include_directories(${CMAKE_SOURCE_DIR}/src)
+include_directories(${CMAKE_SOURCE_DIR}/external)
 
 set(SOURCES
     src/shader.cpp

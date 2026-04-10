@@ -2,6 +2,7 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #define GIF_FLIP_VERT
+#define MINIAUDIO_IMPLEMENTATION
 
 #include <imgui.h>
 #include <imgui_impl_glfw.h>
@@ -462,6 +463,8 @@ void RenderUI()
     }
     if (ImGui::Combo("Theme", &state.style.theme_index, state.style.themes.data(), state.style.themes.size()))
         state.style.SetTheme();
+    if (ImGui::Checkbox("Music", &state.music.play))
+        state.music.play ? ma_sound_start(&state.music.background) : ma_sound_stop(&state.music.background);
 
     ImGui::EndChild();
     ImGui::PopStyleVar();
@@ -548,6 +551,9 @@ void RenderUI()
         if (hovered)
         {
             state.status.plot = std::format("x: {}, y: {}", p->X(mouse.x), p->Y(mouse.y));
+            // copy current coordinates
+            if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_C))
+                glfwSetClipboardString(window, std::format("{}, {}", p->X(mouse.x), p->Y(mouse.y)).c_str());
             // non polygon interactions
             if (!state.polyselect.selecting)
             {
@@ -638,6 +644,13 @@ void RenderUI()
         state.graphics.Render();
     }
 
+    // music
+    if (state.music.play && ma_sound_at_end(&state.music.background))
+    {
+        // music ended
+        state.music.Tick();
+    }
+
     // status reset
     if (!plots_hovered)
         state.status.plot = state.graphics.count.vhf > 0
@@ -710,8 +723,14 @@ int main()
         "The atmosphere is waiting.",
         "Good things are brewing!",
     };
+    srand(time(nullptr));
     state.status.idle = idle_strings[rand() % idle_strings.size()];
     state.status.global = state.status.idle;
+
+    // audio engine
+    ma_engine_init(NULL, &state.music.engine);
+    state.music.current = rand() % state.music.files.size();
+    ma_sound_init_from_file(&state.music.engine, state.music.files[state.music.current], 0, NULL, NULL, &state.music.background);
 
     // imgui stuff
     IMGUI_CHECKVERSION();

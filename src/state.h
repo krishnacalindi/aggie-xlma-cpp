@@ -11,6 +11,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <fstream>
 #include <sstream>
+#include <external/miniaudio.h>
 
 #include <graphics.h>
 #include <select.h>
@@ -72,6 +73,40 @@ struct State
 
         DB() : db(nullptr), con(db) {}
     };
+    struct Music
+    {
+        ma_sound background;
+        ma_engine engine;
+        bool play = false, waiting = false;
+        int current = 0;
+        clock_t end_time = 0;
+        const std::array<const char *, 6> files = {"music/piano 1.wav", "music/piano 2.mp3", "music/piano 3.mp3",
+                                                   "music/piano 4.wav", "music/piano 5.wav", "music/piano 6.mp3"};
+
+        void Tick()
+        {
+            // song ended
+            if (!waiting)
+            {
+                end_time = clock();
+                waiting = true;
+            }
+            // cooldown for one minute
+            else if ((clock() - end_time) * 1000 / CLOCKS_PER_SEC >= 60000)
+            {
+                waiting = false;
+                int next;
+                do
+                {
+                    next = rand() % files.size(); // ensuring no repeat
+                } while (next == current);
+                current = next;
+                ma_sound_uninit(&background);
+                ma_sound_init_from_file(&engine, files[current], 0, NULL, NULL, &background);
+                ma_sound_start(&background); // new song!
+            }
+        }
+    };
 
     // variables
     DB db;
@@ -81,6 +116,7 @@ struct State
     Filter filter;
     Style style;
     PolySelect polyselect;
+    Music music;
 
     // functions
 
