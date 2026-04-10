@@ -34,7 +34,7 @@ All tests were conducted with files from the July 12, 2022 TRACER case from the 
 - Load and visualize ENTLN/NLDN lightning data alongside VHF sources, with toggleable IC and CG strokes.
 - Interactive polygon selection with preview of selection boundary
 - Multiple themes, colormaps, and color-by options available.
-- Export current data as `.parquet` or `.csv`, and save plots as `.png` or animated `.
+- Export current data as `.parquet` or `.csv`, and save plots as `.png` or animated `.gif`.
 
 ## Authors:
 - Krishna Calindi
