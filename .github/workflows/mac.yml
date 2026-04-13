@@ -28,20 +28,23 @@ jobs:
             portable-file-dialogs \
             stb \
             zlib \
-            --triplet x64-osx
+            --triplet arm64-osx
 
       - name: Build
         run: |
           cmake -B build -S . \
             -DCMAKE_TOOLCHAIN_FILE=~/vcpkg/scripts/buildsystems/vcpkg.cmake \
-            -DVCPKG_TARGET_TRIPLET=x64-osx \
+            -DVCPKG_TARGET_TRIPLET=arm64-osx \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
 
-      - name: Zip output
-        run: zip -r AggieXLMA-mac.zip build/Release/
+      - name: Zip
+        run: |
+          mkdir -p artifacts
+          cp build/AggieXLMA artifacts/
+          zip -r AggieXLMA-mac.zip artifacts/
 
-      - name: Upload artifact
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
           name: AggieXLMA-mac
