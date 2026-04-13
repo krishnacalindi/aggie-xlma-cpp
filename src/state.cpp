@@ -28,18 +28,8 @@ std::string State::ColorBy()
     }
 }
 
-void State::Filter()
+void State::FetchVhf()
 {
-    // updating plot column
-    std::string filter_query = "UPDATE lma SET plot = (number_stations >= " + std::to_string(filter.min_stations) +
-                               " AND alt >= " + std::to_string(filter.min_alt) +
-                               " AND alt <= " + std::to_string(filter.max_alt) +
-                               " AND chi >= " + std::to_string(filter.min_chi) +
-                               " AND chi <= " + std::to_string(filter.max_chi) +
-                               " AND pdb >= " + std::to_string(filter.min_power) +
-                               " AND pdb <= " + std::to_string(filter.max_power) + ");";
-    db.con.Query(filter_query);
-
     // getting data
     std::string data_query =
         "WITH bounds AS ("
@@ -69,6 +59,46 @@ void State::Filter()
     auto hist_result = db.con.Query(hist_query);
 
     graphics.ProcessResult(data_result, hist_result);
+}
+
+void State::FetchEntln()
+{
+    std::string entln_query =
+        "WITH day_start AS ("
+        "SELECT DATE_TRUNC('day', MIN(datetime)) AS day FROM lma WHERE plot = true"
+        ") "
+        "SELECT "
+        "CAST(EPOCH_NS(timestamp::TIMESTAMP) - EPOCH_NS(day) AS FLOAT) AS time, "
+        "longitude::FLOAT AS lon, "
+        "latitude::FLOAT AS lat, "
+        "CASE WHEN type = 1 THEN icheight::FLOAT / 1000.0 ELSE 4.0 END AS alt, "
+        "CASE WHEN type = 40 THEN 0.0 ELSE type::FLOAT END AS l_type, "
+        "peakcurrent::FLOAT AS charge, "
+        "SUM(CASE WHEN type = 40 OR type = 0 THEN 1 ELSE 0 END) OVER() AS cg_count "
+        "FROM entln CROSS JOIN day_start "
+        "WHERE plot = true "
+        "ORDER BY l_type";
+    auto entln_result = db.con.Query(entln_query);
+    graphics.ProcessEntlnResult(entln_result);
+}
+
+void State::VhfFilter()
+{
+    // updating plot column
+    std::string filter_query = "UPDATE lma SET plot = (number_stations >= " + std::to_string(filter.min_stations) +
+                               " AND alt >= " + std::to_string(filter.min_alt) +
+                               " AND alt <= " + std::to_string(filter.max_alt) +
+                               " AND chi >= " + std::to_string(filter.min_chi) +
+                               " AND chi <= " + std::to_string(filter.max_chi) +
+                               " AND pdb >= " + std::to_string(filter.min_power) +
+                               " AND pdb <= " + std::to_string(filter.max_power) + ");";
+    db.con.Query(filter_query);
+
+    // saving plot
+    int temp = tl.vhf.save();
+    db.con.Query("UPDATE vhf_tl SET tl_" + std::to_string(temp) + " = l.plot FROM lma l WHERE vhf_tl.rowid = l.rowid");
+
+    FetchVhf();
 }
 
 void State::SpatialFilter()
@@ -112,88 +142,53 @@ void State::SpatialFilter()
                                 "ST_Contains(ST_GeomFromText('" + wkt + "')::POLYGON_2D, ST_Point2D(" + col_x + ", " + col_y + "))) WHERE plot = true";
     db.con.Query(spatial_query);
 
-    // do normal query and histogram query again
-    // getting data
-    std::string data_query =
-        "WITH bounds AS ("
-        "SELECT MIN(epoch) AS min_time, MAX(epoch) AS max_time, "
-        "MIN(lon) AS min_lon, MAX(lon) AS max_lon, "
-        "MIN(lat) AS min_lat, MAX(lat) AS max_lat, "
-        "MIN(alt) AS min_alt, MAX(alt) AS max_alt "
-        "FROM lma WHERE plot = true"
-        ") "
-        "SELECT t.epoch, t.lon, t.lat, t.alt, CAST(0.5 AS FLOAT) AS color, "
-        "b.min_time, b.max_time, b.min_lon, b.max_lon, b.min_lat, b.max_lat, b.min_alt, b.max_alt "
-        "FROM lma t "
-        "CROSS JOIN bounds b "
-        "WHERE t.plot = true "
-        "ORDER BY t.epoch";
-    auto data_result = db.con.Query(data_query);
+    // saving plot
+    int temp = tl.vhf.save();
+    db.con.Query("UPDATE vhf_tl SET tl_" + std::to_string(temp) + " = l.plot FROM lma l WHERE vhf_tl.rowid = l.rowid");
 
-    // histogram (done seperately as size of output differs)
-    std::string hist_query = "SELECT "
-                             "FLOOR(alt / 0.1) * 0.1 AS bin, "
-                             "COUNT(*)::FLOAT AS count, "
-                             "MIN(COUNT(*)) OVER() AS min_count, "
-                             "MAX(COUNT(*)) OVER() AS max_count "
-                             "FROM lma "
-                             "WHERE plot = true AND alt >= 0 AND alt <= 20 GROUP BY bin "
-                             "ORDER BY bin";
-    auto hist_result = db.con.Query(hist_query);
+    FetchVhf();
 
-    graphics.ProcessResult(data_result, hist_result);
+    if (entln)
+    { 
+        // redoing entln time bounds
+        db.con.Query(
+            "WITH day_start AS ("
+            "SELECT MIN(datetime) AS min_dt, MAX(datetime) AS max_dt FROM lma WHERE plot = true"
+            ") "
+            "UPDATE entln SET plot = (plot AND timestamp::TIMESTAMP >= min_dt AND timestamp::TIMESTAMP <= max_dt) "
+            "FROM day_start");
 
-    // redoing entln time bounds
-    db.con.Query(
-        "WITH day_start AS ("
-        "SELECT MIN(datetime) AS min_dt, MAX(datetime) AS max_dt FROM lma WHERE plot = true"
-        ") "
-        "UPDATE entln SET plot = (plot AND timestamp::TIMESTAMP >= min_dt AND timestamp::TIMESTAMP <= max_dt) "
-        "FROM day_start");
-
-    // now entln spatial fitler
-    if (polyselect.plot != &graphics.time_alt) // time resync done above
-    {
-        std::string entln_col_x, entln_col_y;
-        if (polyselect.plot == &graphics.lon_alt)
+        // now entln spatial fitler
+        if (polyselect.plot != &graphics.time_alt) // time resync done above
         {
-            entln_col_x = "longitude";
-            entln_col_y = "icheight / 1000.0"; // alt stored as read from the file
-        }
-        else if (polyselect.plot == &graphics.lon_lat)
-        {
-            entln_col_x = "longitude";
-            entln_col_y = "latitude";
-        }
-        else if (polyselect.plot == &graphics.alt_lat)
-        {
-            entln_col_x = "icheight / 1000.0";
-            entln_col_y = "latitude";
+            std::string entln_col_x, entln_col_y;
+            if (polyselect.plot == &graphics.lon_alt)
+            {
+                entln_col_x = "longitude";
+                entln_col_y = "icheight / 1000.0"; // alt stored as read from the file
+            }
+            else if (polyselect.plot == &graphics.lon_lat)
+            {
+                entln_col_x = "longitude";
+                entln_col_y = "latitude";
+            }
+            else if (polyselect.plot == &graphics.alt_lat)
+            {
+                entln_col_x = "icheight / 1000.0";
+                entln_col_y = "latitude";
+            }
+
+            std::string entln_spatial_query = "UPDATE entln SET plot = (plot AND " +
+                                              std::string(polyselect.keep ? "" : "NOT ") +
+                                              "ST_Contains(ST_GeomFromText('" + wkt + "')::POLYGON_2D, ST_Point2D(" + entln_col_x + ", " + entln_col_y + "))) WHERE plot = true";
+            db.con.Query(entln_spatial_query);
         }
 
-        std::string entln_spatial_query = "UPDATE entln SET plot = (plot AND " +
-                                          std::string(polyselect.keep ? "" : "NOT ") +
-                                          "ST_Contains(ST_GeomFromText('" + wkt + "')::POLYGON_2D, ST_Point2D(" + entln_col_x + ", " + entln_col_y + "))) WHERE plot = true";
-        db.con.Query(entln_spatial_query);
+        temp = tl.entln.save();
+        db.con.Query("UPDATE entln_tl SET tl_" + std::to_string(temp) + " = l.plot FROM entln l WHERE entln_tl.rowid = l.rowid");
+
+        FetchEntln();
     }
-
-    std::string entln_query =
-        "WITH day_start AS ("
-        "SELECT DATE_TRUNC('day', MIN(datetime)) AS day FROM lma WHERE plot = true"
-        ") "
-        "SELECT "
-        "CAST(EPOCH_NS(timestamp::TIMESTAMP) - EPOCH_NS(day) AS FLOAT) AS time, "
-        "longitude::FLOAT AS lon, "
-        "latitude::FLOAT AS lat, "
-        "CASE WHEN type = 1 THEN icheight::FLOAT / 1000.0 ELSE 4.0 END AS alt, "
-        "CASE WHEN type = 40 THEN 0.0 ELSE type::FLOAT END AS l_type, "
-        "peakcurrent::FLOAT AS charge, "
-        "SUM(CASE WHEN type = 40 OR type = 0 THEN 1 ELSE 0 END) OVER() AS cg_count "
-        "FROM entln CROSS JOIN day_start "
-        "WHERE plot = true "
-        "ORDER BY l_type";
-    auto entln_result = db.con.Query(entln_query);
-    graphics.ProcessEntlnResult(entln_result);
 }
 
 void State::EntlnFilter()
@@ -205,23 +200,10 @@ void State::EntlnFilter()
         "UPDATE entln SET plot = (timestamp::TIMESTAMP >= min_dt AND timestamp::TIMESTAMP <= max_dt) "
         "FROM day_start");
 
-    std::string entln_query =
-        "WITH day_start AS ("
-        "SELECT DATE_TRUNC('day', MIN(datetime)) AS day FROM lma WHERE plot = true"
-        ") "
-        "SELECT "
-        "CAST(EPOCH_NS(timestamp::TIMESTAMP) - EPOCH_NS(day) AS FLOAT) AS time, "
-        "longitude::FLOAT AS lon, "
-        "latitude::FLOAT AS lat, "
-        "CASE WHEN type = 1 THEN icheight::FLOAT / 1000.0 ELSE 4.0 END AS alt, "
-        "CASE WHEN type = 40 THEN 0.0 ELSE type::FLOAT END AS l_type, "
-        "peakcurrent::FLOAT AS charge, "
-        "SUM(CASE WHEN type = 40 OR type = 0 THEN 1 ELSE 0 END) OVER() AS cg_count "
-        "FROM entln CROSS JOIN day_start "
-        "WHERE plot = true "
-        "ORDER BY l_type";
-    auto entln_result = db.con.Query(entln_query);
-    graphics.ProcessEntlnResult(entln_result);
+    int temp = tl.entln.save();
+    db.con.Query("UPDATE entln_tl SET tl_" + std::to_string(temp) + " = l.plot FROM entln l WHERE entln_tl.rowid = l.rowid");
+
+    FetchEntln();
 }
 
 void State::Color()

@@ -3,7 +3,6 @@
 ## Major
 - Charge functionality from XLMA
 - Migrate graphics pipeline from OpenGL to Vulkan
-- undo/redo
 - Flash algorithms: XLMA, McCaul 
 
 ## Minor

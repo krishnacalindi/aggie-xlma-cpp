@@ -28,6 +28,15 @@ void PolySelect::Add(ImVec2 mouse, Graphics::Plot *p, bool last)
     }
 }
 
+void PolySelect::Remove()
+{
+    clicks.pop_back();
+    xs.pop_back();
+    ys.pop_back();
+    if (clicks.empty())
+        Reset();
+}
+
 void PolySelect::Reset()
 {
     selecting = false;

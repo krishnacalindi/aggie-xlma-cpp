@@ -50,7 +50,7 @@ inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, 
     }
 }
 
-void RenderUI()
+void Tick()
 {
     // menu bar
     if (ImGui::BeginMainMenuBar())
@@ -70,6 +70,8 @@ void RenderUI()
                     try
                     {
                         state.db.con.Query("DROP TABLE IF EXISTS lma");
+                        state.db.con.Query("DROP TABLE IF EXISTS lma_tl");
+                        state.db.con.Query("CREATE TABLE vhf_tl (tl_1 BOOLEAN, tl_2 BOOLEAN, tl_3 BOOLEAN, tl_4 BOOLEAN, tl_5 BOOLEAN)");
                         state.db.con.Query("CREATE TABLE lma (datetime TIMESTAMP_NS, lat FLOAT, lon FLOAT, alt FLOAT, chi FLOAT, pdb FLOAT, number_stations UTINYINT, plot BOOLEAN DEFAULT true, epoch FLOAT)");
 
                         state.graphics.ReadStations(selection[0]);
@@ -133,8 +135,9 @@ void RenderUI()
                                             ") t;");
                             state.db.con.Query("UPDATE lma SET epoch = CAST(EPOCH_NS(datetime) - EPOCH_NS(DATE_TRUNC('day', (SELECT MIN(datetime) FROM lma))) AS FLOAT)");
                         }
+                        state.db.con.Query("INSERT INTO vhf_tl SELECT plot, plot, plot, plot, plot FROM lma"); // initializing the vhf timeline db
                         state.status.global = "Loaded " + std::to_string(selection.size()) + " LYLOUT files";
-                        state.Filter();
+                        state.VhfFilter();
                     }
                     catch (const std::exception &e)
                     {
@@ -168,6 +171,8 @@ void RenderUI()
                         paths_sql += "]";
 
                         state.db.con.Query("DROP TABLE IF EXISTS entln");
+                        state.db.con.Query("DROP TABLE IF EXISTS entln_tl");
+                        state.db.con.Query("CREATE TABLE entln_tl (tl_1 BOOLEAN, tl_2 BOOLEAN, tl_3 BOOLEAN, tl_4 BOOLEAN, tl_5 BOOLEAN)");
                         std::string entln_query =
                             "CREATE TABLE entln AS SELECT * FROM read_csv(" + paths_sql + ", "
                                                                                           "auto_detect=false, delim=',', new_line='\\n', skip=0, header=true, "
@@ -177,6 +182,8 @@ void RenderUI()
                                                                                           "'bearing': 'VARCHAR'})";
                         state.db.con.Query(entln_query);
                         state.db.con.Query("ALTER TABLE entln ADD COLUMN plot BOOLEAN DEFAULT true"); // plot column for spatial fitler
+                        state.db.con.Query("INSERT INTO entln_tl SELECT plot, plot, plot, plot, plot FROM entln"); // initializing the entln timeline db
+                        state.entln = true;
                         state.status.global = "Loaded " + std::to_string(selection.size()) + " ENTLN files";
                         state.EntlnFilter();
                     }
@@ -407,19 +414,19 @@ void RenderUI()
     // filters
     ImGui::Text("Filters");
     if (ImGui::InputFloat("Min. Stations", &state.filter.min_stations))
-        state.Filter();
+        state.VhfFilter();
     if (ImGui::InputFloat("Min. Altitude", &state.filter.min_alt))
-        state.Filter();
+        state.VhfFilter();
     if (ImGui::InputFloat("Max. Altitude", &state.filter.max_alt))
-        state.Filter();
+        state.VhfFilter();
     if (ImGui::InputFloat("Min. Chi", &state.filter.min_chi))
-        state.Filter();
+        state.VhfFilter();
     if (ImGui::InputFloat("Max. Chi", &state.filter.max_chi))
-        state.Filter();
+        state.VhfFilter();
     if (ImGui::InputFloat("Min. Power", &state.filter.min_power))
-        state.Filter();
+        state.VhfFilter();
     if (ImGui::InputFloat("Max. Power", &state.filter.max_power))
-        state.Filter();
+        state.VhfFilter();
 
     // layers:  maps, features, etc
     ImGui::Text("Layers");
@@ -455,6 +462,46 @@ void RenderUI()
 
     // other
     ImGui::Text("Other");
+    ImGui::BeginDisabled(state.tl.vhf.undo <= 0);
+    if (ImGui::Button("Undo##vhf"))
+    {
+        int temp = state.tl.vhf.Undo();
+        state.db.con.Query("UPDATE lma SET plot = v.tl_" + std::to_string(temp) + " FROM vhf_tl v WHERE lma.rowid = v.rowid");
+        state.FetchVhf();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(state.tl.vhf.redo <= 0);
+    if (ImGui::Button("Redo##vhf"))
+    {
+        int temp = state.tl.vhf.Redo();
+        state.db.con.Query("UPDATE lma SET plot = v.tl_" + std::to_string(temp) + " FROM vhf_tl v WHERE lma.rowid = v.rowid");
+        state.FetchVhf();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::Text("LMA");
+
+    ImGui::BeginDisabled(state.tl.entln.undo <= 0);
+    if (ImGui::Button("Undo##entln"))
+    {
+        int temp = state.tl.entln.Undo();
+        state.db.con.Query("UPDATE entln SET plot = v.tl_" + std::to_string(temp) + " FROM entln_tl v WHERE entln.rowid = v.rowid");
+        state.FetchEntln();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(state.tl.entln.redo <= 0);
+    if (ImGui::Button("Redo##entln"))
+    {
+        int temp = state.tl.entln.Redo();
+        state.db.con.Query("UPDATE entln SET plot = v.tl_" + std::to_string(temp) + " FROM entln_tl v WHERE entln.rowid = v.rowid");
+        state.FetchEntln();
+    }
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::Text("ENTLN/NLDN");
+
     if (ImGui::InputInt("VHF Size", &state.style.vhf_size, 1, 2))
     {
         state.style.vhf_size = std::clamp(state.style.vhf_size, 1, 10);
@@ -643,6 +690,13 @@ void RenderUI()
         state.graphics.UpdateTickLabels();
         state.graphics.Render();
     }
+    // ctrl + z: undo
+    if (ImGui::IsKeyChordPressed(ImGuiMod_Ctrl | ImGuiKey_Z))
+    {
+        // polygon undo
+        if (state.polyselect.selecting)
+            state.polyselect.Remove();
+    }
 
     // music
     if (state.music.play && ma_sound_at_end(&state.music.background))
@@ -750,7 +804,7 @@ int main()
     state.style.padding = ImGui::GetFontSize() * 0.5f;
     state.style.axis_size = ImGui::GetFontSize() * 1.8f;
     state.style.tick_height = ImGui::GetFontSize() * 0.4f;
-    RenderUI();
+    Tick();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     glfwSwapBuffers(window);
@@ -768,7 +822,7 @@ int main()
 
         if (state.anime.animating) // animation handler has to work per frame of UI renderer
             state.Frame();
-        RenderUI();
+        Tick();
 
         ImGui::Render();
         int display_w, display_h;

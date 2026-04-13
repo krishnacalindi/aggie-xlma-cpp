@@ -73,6 +73,36 @@ struct State
 
         DB() : db(nullptr), con(db) {}
     };
+    struct TL
+    {
+        int current = 0, undo = -1, redo = -1;
+
+        int save()
+        {
+            current = (current + 1) % 5;
+            undo = undo + 1 > 4 ? 4 : undo + 1;
+            redo = 0; // resetting
+            return current;
+        }
+        int Undo()
+        {
+            if (undo == 0)
+                return current; // no more undos
+            redo++;
+            undo--;
+            current = current == 0 ? 4 : current - 1;
+            return current;
+        }
+        int Redo()
+        {
+            if (redo == 0)
+                return current; // no more redos
+            redo--;
+            undo++;
+            current = (current + 1) % 5;
+            return current;
+        }
+    };
     struct Music
     {
         ma_sound background;
@@ -109,6 +139,7 @@ struct State
     };
 
     // variables
+    bool entln = false; // is entln data loaded?
     DB db;
     Status status;
     Graphics graphics;
@@ -117,18 +148,32 @@ struct State
     Style style;
     PolySelect polyselect;
     Music music;
+    struct
+    {
+        TL vhf, entln;
+    } tl;
 
     // functions
 
+    // for animation/gif saving
     void Frame();                               // render a frame of animation
-    void Flip();                                // flippping the theme (please use dark mode)
     void StartSaveGIF(const std::string &path); // does gif writer initializing for saving
     void SaveGIFFrame();                        // saves current plot frame
-    void Filter();                              // filters db using sql query
-    void SpatialFilter();                       // filters plotted with duckdb spatial
-    void EntlnFilter();                         // entln fitler
-    std::string ColorBy();                      // helper for color by query
-    void Color();                               // color only query
+
+    // main filtering
+    void VhfFilter();     // regular input based filters
+    void EntlnFilter();   // entln fitlers
+    void SpatialFilter(); // polygon based spatial filters
+
+    // vhf colors
+    void Color(); // color only query
+
+    // pre render
+    void FetchVhf();   //  function fetches the vhf data and prepares for rendering
+    void FetchEntln(); //  function fetches the entln data and prepares for rendering
+
+private:
+    std::string ColorBy(); // helper for color by query
 };
 
 #endif

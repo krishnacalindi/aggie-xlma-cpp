@@ -14,6 +14,7 @@ struct PolySelect
 
     void Add(ImVec2 mouse, Graphics::Plot *p, bool last = false); // adds a new point
     void Reset();                                                 // resets filter data
+    void Remove();                                                // removes one point
 };
 
 #endif
