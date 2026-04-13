@@ -145,7 +145,7 @@ struct State
     Graphics graphics;
     Anime anime;
     Filter filter;
-    Style style;
+    AppStyle style;
     PolySelect polyselect;
     Music music;
     struct

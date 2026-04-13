@@ -9,7 +9,7 @@ themes imported from https://github.com/ocornut/imgui/issues/707#issuecomment-41
 thanks to 'TheAncientOwl' for listing all the themes
 */
 
-struct Style
+struct AppStyle
 {
     // custom styles
     int vhf_size = 1;
