@@ -1,4 +1,4 @@
-name: Mac Build
+name: Mac build
 
 on:
   workflow_dispatch:
@@ -14,6 +14,7 @@ jobs:
       - name: Install vcpkg
         run: |
           git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
+          cd ~/vcpkg && git checkout 15e5f3820f0370f1ba7150853762cec0688cd396
           ~/vcpkg/bootstrap-vcpkg.sh
 
       - name: Install dependencies
