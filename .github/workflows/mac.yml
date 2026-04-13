@@ -1,0 +1,48 @@
+name: Mac Build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install vcpkg
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git ~/vcpkg
+          ~/vcpkg/bootstrap-vcpkg.sh
+
+      - name: Install dependencies
+        run: |
+          ~/vcpkg/vcpkg install \
+            duckdb \
+            glew \
+            glfw3 \
+            glm \
+            imgui[glfw-binding,opengl3-binding] \
+            portable-file-dialogs \
+            stb \
+            zlib \
+            --triplet x64-osx
+
+      - name: Build
+        run: |
+          cmake -B build -S . \
+            -DCMAKE_TOOLCHAIN_FILE=~/vcpkg/scripts/buildsystems/vcpkg.cmake \
+            -DVCPKG_TARGET_TRIPLET=x64-osx \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Zip output
+        run: zip -r AggieXLMA-mac.zip build/Release/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AggieXLMA-mac
+          path: AggieXLMA-mac.zip
+          retention-days: 7
