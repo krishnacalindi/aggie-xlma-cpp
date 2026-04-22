@@ -22,7 +22,7 @@ void Graphics::_setup_vao(GLuint &vao, GLuint vbo, int stride, std::initializer_
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
     for (int i = 0; int offset : offsets)
     {
-        glVertexAttribPointer(i, 1, GL_FLOAT, GL_FALSE, stride * sizeof(float), (void *)(offset * sizeof(float)));
+        glVertexAttribPointer(i, 1, GL_FLOAT, GL_FALSE, stride * sizeof(float), reinterpret_cast<void*>(offset * sizeof(float)));
         glEnableVertexAttribArray(i);
         i++;
     }
@@ -131,7 +131,7 @@ void Graphics::ProcessResult(QueryResult &data_res, QueryResult &hist_res)
     // vhf stuff
     glBindBuffer(GL_ARRAY_BUFFER, time_alt.vhf.vbo);
     glBufferData(GL_ARRAY_BUFFER, count.vhf * 5 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-    float *vhf_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+    float* vhf_ptr = reinterpret_cast<float*>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
     size_t chunk_i = 0; // global index
     while (chunk)
     {
@@ -158,9 +158,9 @@ void Graphics::ProcessResult(QueryResult &data_res, QueryResult &hist_res)
     // histogram stuff
     glBindBuffer(GL_ARRAY_BUFFER, alt_hist.vhf.vbo);
     glBufferData(GL_ARRAY_BUFFER, 200 * 2 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-    float *hist_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+    float* hist_ptr = reinterpret_cast<float*>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
     chunk_i = 0; // global index
-    while (auto chunk = hist_res->Fetch())
+    while (chunk = hist_res->Fetch())
     {
         float *y_data = duckdb::FlatVector::GetData<float>(chunk->data[0]);
         float *x_data = duckdb::FlatVector::GetData<float>(chunk->data[1]);
@@ -187,7 +187,7 @@ void Graphics::ProcessEntlnResult(QueryResult &entln_res)
         count.entln_cg = entln_res->GetValue<int>(6, 0);
         glBindBuffer(GL_ARRAY_BUFFER, time_alt.entln.vbo);
         glBufferData(GL_ARRAY_BUFFER, count.entln * 6 * sizeof(float), nullptr, GL_DYNAMIC_DRAW);
-        float *entln_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+        float* entln_ptr = reinterpret_cast<float*>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
         int chunk_i = 0;
         while (auto chunk = entln_res->Fetch())
         {
@@ -221,7 +221,7 @@ void Graphics::ProcessColor(QueryResult &res)
     if (res->RowCount() == count.vhf && count.vhf > 1)
     {
         glBindBuffer(GL_ARRAY_BUFFER, time_alt.vhf.vbo);
-        float *vhf_ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY);
+        float* vhf_ptr = reinterpret_cast<float*>(glMapBuffer(GL_ARRAY_BUFFER, GL_WRITE_ONLY));
         size_t chunk_i = 0;
         while (auto chunk = res->Fetch())
         {
@@ -356,7 +356,7 @@ void Graphics::ReadStations(const std::string &filepath)
         if (probe)
         {
             unsigned char b[2] = {};
-            probe.read((char *)b, 2);
+            probe.read(reinterpret_cast<char*>(b), 2);
             is_gz = (b[0] == 0x1F && b[1] == 0x8B);
         }
     }

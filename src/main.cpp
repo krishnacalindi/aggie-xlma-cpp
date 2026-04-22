@@ -27,12 +27,11 @@ inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, 
     pos.x = IM_ROUND(pos.x);
     pos.y = IM_ROUND(pos.y);
     ImFont *font = GImGui->Font;
-    const ImFontGlyph *glyph;
     char c;
     float scale = GImGui->FontSize / font->FontSize;
     while ((c = *text++))
     {
-        glyph = font->FindGlyph(c);
+        const ImFontGlyph *glyph = font->FindGlyph(c);
         if (!glyph)
             continue;
         DrawList->PrimReserve(6, 4);
@@ -53,6 +52,7 @@ inline void AddVerticalText(ImDrawList *DrawList, const char *text, ImVec2 pos, 
 void Tick()
 {
     // menu bar
+    ImGui::PushFont(state.style.font);
     if (ImGui::BeginMainMenuBar())
     {
         if (ImGui::BeginMenu("Open"))
@@ -82,11 +82,10 @@ void Tick()
                         for (const auto &filepath : selection)
                         {
                             std::smatch match;
-                            std::string yymmdd;
 
                             if (std::regex_match(filepath, match, date_pattern))
                             {
-                                yymmdd = match[1].str();
+                                std::string yymmdd = match[1].str();
                                 int year = 2000 + std::stoi(yymmdd.substr(0, 2));
                                 int month = std::stoi(yymmdd.substr(2, 2));
                                 int day = std::stoi(yymmdd.substr(4, 2));
@@ -639,7 +638,7 @@ void Tick()
                 }
             }
             // polygon interactions
-            else if (state.polyselect.plot == p && hovered)
+            else if (state.polyselect.plot == p)
             {
                 ImDrawList *draw_list = ImGui::GetForegroundDrawList();
                 ImU32 color = state.polyselect.keep ? IM_COL32(0, 255, 0, 255) : IM_COL32(255, 0, 0, 255);
@@ -710,7 +709,7 @@ void Tick()
         state.status.plot = state.graphics.count.vhf > 0
                                 ? std::format("Plotted {} VHF, {} ENTLN ({} CG) sources", state.graphics.count.vhf, state.graphics.count.entln, state.graphics.count.entln_cg)
                                 : "Nothing to plot.";
-
+    ImGui::PopFont();
     ImGui::End();
 }
 
@@ -745,7 +744,7 @@ int main()
 
     // icon
     GLFWimage icon;
-    icon.pixels = stbi_load("bin/xlma.png", &icon.width, &icon.height, nullptr, 4);
+    icon.pixels = stbi_load("assets/xlma.png", &icon.width, &icon.height, nullptr, 4);
     if (icon.pixels)
     {
         glfwSetWindowIcon(window, 1, &icon);
@@ -794,7 +793,7 @@ int main()
     // setting theme
     ImGuiStyle &style = ImGui::GetStyle();
     state.style.SetStyle(style);
-    io.FontGlobalScale = state.style.font_scale;
+    state.style.font = io.Fonts->AddFontFromFileTTF("assets/font.ttf", 25.0f);
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
     // manual initial renderui
@@ -825,6 +824,7 @@ int main()
         Tick();
 
         ImGui::Render();
+       
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
         glViewport(0, 0, display_w, display_h);

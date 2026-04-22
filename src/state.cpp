@@ -1,6 +1,6 @@
 #include "state.h"
 #include <format>
-#include <external/gif.h>
+#include <external/gif.h>//-V::
 
 // helper for color by
 std::string State::ColorBy()
@@ -245,7 +245,7 @@ void State::StartSaveGIF(const std::string &path)
 {
     anime.gif_path = path;
     anime.gif = new GifWriter();
-    GifBegin((GifWriter *)anime.gif, path.c_str(), graphics.rect.w, graphics.rect.h, 10);
+    GifBegin(reinterpret_cast<GifWriter*>(anime.gif), path.c_str(), graphics.rect.w, graphics.rect.h, 10);
     anime.saving = true;
 }
 
@@ -262,7 +262,7 @@ void State::Frame()
         {
             float threshold = graphics.time_alt.x_min + elapsed * (graphics.time_alt.x_max - graphics.time_alt.x_min);
             glBindBuffer(GL_ARRAY_BUFFER, graphics.time_alt.vhf.vbo);
-            float *ptr = (float *)glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
+            const float* ptr = reinterpret_cast<float*>(glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY));
             size_t i = 0;
             while (i < graphics.count.vhf && ptr[i * 5] <= threshold)
                 i++;
@@ -291,12 +291,12 @@ void State::SaveGIFFrame()
     for (int y = 0; y < graphics.rect.h / 2; ++y)
         for (int x = 0; x < graphics.rect.w * 4; ++x)
             std::swap(pixels[y * graphics.rect.w * 4 + x], pixels[(graphics.rect.h - 1 - y) * graphics.rect.w * 4 + x]);
-    GifWriteFrame((GifWriter *)anime.gif, pixels.data(), graphics.rect.w, graphics.rect.h, 10);
+    GifWriteFrame(reinterpret_cast<GifWriter*>(anime.gif), pixels.data(), graphics.rect.w, graphics.rect.h, 10);
     if (!anime.animating)
     {
         status.global = "Saved animation to " + anime.gif_path;
         anime.saving = false;
-        GifEnd((GifWriter *)anime.gif);
+        GifEnd(reinterpret_cast<GifWriter*>(anime.gif));
         delete (GifWriter *)anime.gif;
         anime.gif = nullptr;
     }

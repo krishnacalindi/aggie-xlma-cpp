@@ -11,7 +11,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <fstream>
 #include <sstream>
-#include <external/miniaudio.h>
+#include <external/miniaudio.h>//-V::
 
 #include <graphics.h>
 #include <select.h>
@@ -41,7 +41,7 @@ struct State
         clock_t start;  // when animation started
         bool animating = false, saving = false;
         void *gif = nullptr;
-        std::string gif_path;
+        std::string gif_path = "";
 
         void Start()
         {
@@ -110,8 +110,8 @@ struct State
         bool play = false, waiting = false;
         int current = 0;
         clock_t end_time = 0;
-        const std::array<const char *, 6> files = {"music/piano 1.wav", "music/piano 2.mp3", "music/piano 3.mp3",
-                                                   "music/piano 4.wav", "music/piano 5.wav", "music/piano 6.mp3"};
+        const std::array<const char *, 6> files = {"assets/music/piano 1.wav", "assets/music/piano 2.mp3", "assets/music/piano 3.mp3",
+                                                   "assets/music/piano 4.wav", "assets/music/piano 5.wav", "assets/music/piano 6.mp3"};
 
         void Tick()
         {
@@ -145,7 +145,7 @@ struct State
     Graphics graphics;
     Anime anime;
     Filter filter;
-    AppStyle style;
+    Styl style;
     PolySelect polyselect;
     Music music;
     struct

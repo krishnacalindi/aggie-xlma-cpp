@@ -9,11 +9,11 @@ themes imported from https://github.com/ocornut/imgui/issues/707#issuecomment-41
 thanks to 'TheAncientOwl' for listing all the themes
 */
 
-struct AppStyle
+struct Styl
 {
     // custom styles
     int vhf_size = 1;
-    float font_scale = 1.8f;
+    ImFont *font = nullptr;
     float padding, axis_size, tick_height;
     const std::array<float, 3> three_ticks = {0.2f, 0.5f, 0.8f};
     const std::array<float, 5> five_ticks = {0.1f, 0.3f, 0.5f, 0.7f, 0.9f};

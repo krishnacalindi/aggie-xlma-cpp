@@ -1,6 +1,6 @@
 #include <style.h>
 
-void AppStyle::SetStyle(ImGuiStyle &_style)
+void Styl::SetStyle(ImGuiStyle &_style)
 {
     imgui_style = &_style;
     imgui_colors = _style.Colors;
@@ -28,7 +28,7 @@ void AppStyle::SetStyle(ImGuiStyle &_style)
     // imgui_style->TabRounding = 3.0f;
 }
 
-void AppStyle::SetTheme()
+void Styl::SetTheme()
 {
     switch (theme_index)
     {
@@ -77,17 +77,17 @@ void AppStyle::SetTheme()
     }
 }
 
-void AppStyle::_set_dark()
+void Styl::_set_dark()
 {
     ImGui::StyleColorsDark();
 }
 
-void AppStyle::_set_light()
+void Styl::_set_light()
 {
     ImGui::StyleColorsLight();
 }
 
-void AppStyle::_set_forest()
+void Styl::_set_forest()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(0.85f, 0.90f, 0.85f, 1.00f);
@@ -169,7 +169,7 @@ void AppStyle::_set_forest()
     imgui_colors[ImGuiCol_ModalWindowDimBg] = ImVec4(0.05f, 0.08f, 0.05f, 0.60f);
 }
 
-void AppStyle::_set_amethyst()
+void Styl::_set_amethyst()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(0.92f, 0.90f, 0.95f, 1.00f);
@@ -233,7 +233,7 @@ void AppStyle::_set_amethyst()
     imgui_colors[ImGuiCol_NavHighlight] = ImVec4(0.60f, 0.45f, 0.90f, 1.00f);
 }
 
-void AppStyle::_set_sapphire()
+void Styl::_set_sapphire()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(0.90f, 0.93f, 0.97f, 1.00f);
@@ -297,7 +297,7 @@ void AppStyle::_set_sapphire()
     imgui_colors[ImGuiCol_NavHighlight] = ImVec4(0.40f, 0.70f, 1.00f, 1.00f);
 }
 
-void AppStyle::_set_amber()
+void Styl::_set_amber()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(1.00f, 0.95f, 0.80f, 1.00f); // Soft cream-yellow
@@ -361,7 +361,7 @@ void AppStyle::_set_amber()
     imgui_colors[ImGuiCol_NavHighlight] = ImVec4(0.95f, 0.80f, 0.10f, 1.00f);
 }
 
-void AppStyle::_set_dracula()
+void Styl::_set_dracula()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(0.97f, 0.97f, 0.95f, 1.00f);         // #f8f8f2
@@ -424,7 +424,7 @@ void AppStyle::_set_dracula()
     imgui_colors[ImGuiCol_NavHighlight] = ImVec4(0.74f, 0.58f, 0.98f, 1.00f);
 }
 
-void AppStyle::_set_catppuccin_mocha()
+void Styl::_set_catppuccin_mocha()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(0.80f, 0.84f, 0.96f, 1.00f);         // Text
@@ -482,7 +482,7 @@ void AppStyle::_set_catppuccin_mocha()
     imgui_colors[ImGuiCol_NavHighlight] = ImVec4(0.71f, 0.75f, 1.00f, 1.00f); // Lavender
 }
 
-void AppStyle::_set_gruvbox()
+void Styl::_set_gruvbox()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(0.92f, 0.86f, 0.70f, 1.00f);         // #ebdbb2
@@ -538,7 +538,7 @@ void AppStyle::_set_gruvbox()
     imgui_colors[ImGuiCol_NavHighlight] = ImVec4(0.98f, 0.29f, 0.20f, 1.00f);
 }
 
-void AppStyle::_set_crimson()
+void Styl::_set_crimson()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(1.00f, 0.90f, 0.90f, 1.00f); // Slight pinkish tint to off-white
@@ -594,7 +594,7 @@ void AppStyle::_set_crimson()
     imgui_colors[ImGuiCol_NavHighlight] = ImVec4(0.85f, 0.15f, 0.15f, 1.00f);
 }
 
-void AppStyle::_set_rose()
+void Styl::_set_rose()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(0.95f, 0.90f, 0.95f, 1.00f); // Soft white-pink
@@ -649,7 +649,7 @@ void AppStyle::_set_rose()
     imgui_colors[ImGuiCol_NavHighlight] = ImVec4(0.95f, 0.60f, 0.75f, 1.00f);
 }
 
-void AppStyle::_set_cyberpunk()
+void Styl::_set_cyberpunk()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(0.00f, 1.00f, 0.62f, 1.00f); // Neon Green/Cyan
@@ -704,7 +704,7 @@ void AppStyle::_set_cyberpunk()
     imgui_colors[ImGuiCol_NavHighlight] = ImVec4(1.00f, 0.00f, 0.25f, 1.00f);
 }
 
-void AppStyle::_set_paper()
+void Styl::_set_paper()
 {
     // Text
     imgui_colors[ImGuiCol_Text] = ImVec4(0.12f, 0.12f, 0.12f, 1.00f); // Deep Carbon Ink

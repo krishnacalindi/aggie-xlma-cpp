@@ -17,7 +17,7 @@ struct Shader
     void UpdateVHFShader(int size); // helper for updating vhf shader size
 
 private:
-    void _link_shader(GLuint &program, const char *vert_src, const char *frag_src); // links shader orograms with their glsl
+    static void _link_shader(GLuint &program, const char *vert_src, const char *frag_src); // links shader orograms with their glsl
 };
 
 #endif
